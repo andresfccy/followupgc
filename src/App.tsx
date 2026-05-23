@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   CalendarCheck,
   CalendarX2,
@@ -19,6 +19,7 @@ import type {
   Weekday,
 } from '@/domain/types'
 import { formatDate, getWeekdayLabel, nextMeetingDate, weekdayOptions } from '@/lib/date'
+import { parseImportFile } from '@/lib/memberImport'
 import { cn } from '@/lib/utils'
 import { useGroupStore } from '@/store/groupStore'
 
@@ -55,6 +56,9 @@ function App() {
   } = useGroupStore()
   const [selectedMemberId, setSelectedMemberId] = useState(members[0]?.id ?? '')
   const [selectedSessionId, setSelectedSessionId] = useState(sessions[0]?.id ?? '')
+  const [importStatus, setImportStatus] = useState(
+    'El contrato de importacion esta preparado. El parser XLSX queda pendiente.',
+  )
 
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0]
   const selectedSession =
@@ -119,6 +123,19 @@ function App() {
     event.currentTarget.reset()
   }
 
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    if (!file) return
+
+    try {
+      await parseImportFile(file)
+    } catch (error) {
+      setImportStatus(error instanceof Error ? error.message : 'No se pudo preparar el archivo.')
+    } finally {
+      event.currentTarget.value = ''
+    }
+  }
+
   return (
     <main className="min-h-svh bg-stone-50 text-slate-950">
       <section className="border-b border-slate-200 bg-white">
@@ -166,6 +183,19 @@ function App() {
                 <Plus size={16} /> Agregar persona
               </button>
             </form>
+
+            <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                Importacion desde archivo de iglesia
+                <input
+                  accept=".xlsx"
+                  className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
+                  onChange={handleImportFile}
+                  type="file"
+                />
+              </label>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{importStatus}</p>
+            </div>
 
             <div className="mt-4 grid gap-2">
               {members.map((member) => (
@@ -404,15 +434,45 @@ function Field({
 }
 
 function MemberSummary({ member }: { member: Member }) {
+  const administrativeFields = [
+    member.documentId ? ['Documento', maskDocumentId(member.documentId)] : null,
+    member.gender ? ['Genero', member.gender] : null,
+    member.birthday ? ['Cumpleanos', member.birthday.replace('-', '/')] : null,
+    member.groupRole ? ['Rol en grupo', member.groupRole] : null,
+    typeof member.semesterAttendances === 'number'
+      ? ['Asistencias semestre', member.semesterAttendances.toString()]
+      : null,
+    typeof member.isServer === 'boolean' ? ['Servidor', member.isServer ? 'Si' : 'No'] : null,
+    typeof member.isServing === 'boolean'
+      ? ['Esta sirviendo', member.isServing ? 'Si' : 'No']
+      : null,
+  ].filter((field): field is [string, string] => Boolean(field))
+
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
       <p className="font-medium text-slate-950">{member.fullName}</p>
       <p className="mt-1 text-sm text-slate-600">
         {memberStatusLabels[member.status]} · Desde {formatDate(member.joinedAt)}
       </p>
+      {administrativeFields.length ? (
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+          {administrativeFields.map(([label, value]) => (
+            <div key={label} className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <dt className="text-xs font-medium uppercase text-slate-500">{label}</dt>
+              <dd className="mt-1 text-sm text-slate-800">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       {member.notes ? <p className="mt-2 text-sm text-slate-600">{member.notes}</p> : null}
     </div>
   )
+}
+
+function maskDocumentId(documentId: string) {
+  if (documentId.length <= 4) return documentId
+
+  return `${'*'.repeat(Math.max(documentId.length - 4, 0))}${documentId.slice(-4)}`
 }
 
 function Timeline({ memberId }: { memberId: string }) {
