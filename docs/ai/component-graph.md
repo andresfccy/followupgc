@@ -42,6 +42,9 @@ Split candidates when the file grows:
 - `src/features/timeline/*`
 - `src/features/settings/*`
 
+Do not split only for style preference. Split when a feature has enough form,
+list, and interaction logic that ownership becomes clearer outside `App.tsx`.
+
 ## `src/store/groupStore.ts`
 
 Owns all persistent mutations:
@@ -65,3 +68,13 @@ Date labels, weekday options, and next-meeting calculation.
 ## `src/lib/utils.ts`
 
 Generic frontend utilities only. Do not add domain logic here.
+
+## UI State Ownership
+
+`App.tsx` owns temporary selection state:
+
+- `selectedMemberId`
+- `selectedSessionId`
+
+Persistent state should stay in `src/store/groupStore.ts`. Do not mirror store
+collections into component state unless there is a concrete UI reason.
