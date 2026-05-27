@@ -5,6 +5,8 @@ import {
   Check,
   Circle,
   Clock3,
+  LogIn,
+  LogOut,
   MessageSquareText,
   Plus,
   Settings,
@@ -19,7 +21,14 @@ import type {
   Weekday,
 } from '@/domain/types'
 import { formatDate, getWeekdayLabel, nextMeetingDate, weekdayOptions } from '@/lib/date'
+import {
+  registerWithEmail,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutCurrentUser,
+} from '@/lib/auth'
 import { parseImportFile } from '@/lib/memberImport'
+import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { cn } from '@/lib/utils'
 import { useGroupStore } from '@/store/groupStore'
 
@@ -43,6 +52,7 @@ const timelineTypeLabels: Record<TimelineEntryType, string> = {
 }
 
 function App() {
+  const authSession = useAuthSession()
   const {
     settings,
     members,
@@ -59,6 +69,7 @@ function App() {
   const [importStatus, setImportStatus] = useState(
     'El contrato de importacion esta preparado. El parser XLSX queda pendiente.',
   )
+  const [authStatus, setAuthStatus] = useState('')
 
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0]
   const selectedSession =
@@ -136,6 +147,57 @@ function App() {
     }
   }
 
+  async function handleGoogleSignIn() {
+    setAuthStatus('')
+
+    try {
+      await signInWithGoogle()
+      await authSession.refresh()
+      setAuthStatus('Sesion iniciada con Google.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo iniciar sesion.')
+    }
+  }
+
+  async function handleEmailAuth(formElement: HTMLFormElement, mode: 'register' | 'sign-in') {
+    setAuthStatus('')
+
+    const form = new FormData(formElement)
+    const email = String(form.get('email') ?? '').trim()
+    const password = String(form.get('password') ?? '')
+
+    if (!email || !password) {
+      setAuthStatus('Escribe correo y contrasena.')
+      return
+    }
+
+    try {
+      if (mode === 'register') {
+        await registerWithEmail(email, password)
+        setAuthStatus('Cuenta creada e inicio de sesion activo.')
+      } else {
+        await signInWithEmail(email, password)
+        setAuthStatus('Sesion iniciada.')
+      }
+
+      await authSession.refresh()
+      formElement.reset()
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo completar la accion.')
+    }
+  }
+
+  async function handleSignOut() {
+    setAuthStatus('')
+
+    try {
+      await signOutCurrentUser()
+      setAuthStatus('Sesion cerrada. El modo local sigue disponible.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo cerrar sesion.')
+    }
+  }
+
   return (
     <main className="min-h-svh bg-stone-50 text-slate-950">
       <section className="border-b border-slate-200 bg-white">
@@ -158,6 +220,13 @@ function App() {
               <Metric icon={Clock3} label="Proxima" value={formatDate(nextMeetingDate(settings.meetingWeekday))} />
             </div>
           </div>
+          <AuthPanel
+            authSession={authSession}
+            authStatus={authStatus}
+            onEmailAuth={handleEmailAuth}
+            onGoogleSignIn={handleGoogleSignIn}
+            onSignOut={handleSignOut}
+          />
         </div>
       </section>
 
@@ -366,6 +435,139 @@ function App() {
         </aside>
       </div>
     </main>
+  )
+}
+
+function AuthPanel({
+  authSession,
+  authStatus,
+  onEmailAuth,
+  onGoogleSignIn,
+  onSignOut,
+}: {
+  authSession: AuthSession
+  authStatus: string
+  onEmailAuth: (formElement: HTMLFormElement, mode: 'register' | 'sign-in') => void
+  onGoogleSignIn: () => void
+  onSignOut: () => void
+}) {
+  const activeMemberships = authSession.memberships.filter(
+    (membership) => membership.status === 'active',
+  )
+  const remoteGroupLabel = authSession.activeDefaultMembership?.groupName
+    ? authSession.activeDefaultMembership.groupName
+    : authSession.defaultGroupId
+      ? `Grupo remoto ${authSession.defaultGroupId}`
+      : ''
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="grid gap-4 lg:grid-cols-[1fr_1.25fr] lg:items-start">
+        <div>
+          <p className="text-sm font-semibold text-slate-950">Sesion Firebase</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            La autenticacion prepara perfil y grupo remoto. Los datos pastorales siguen en este
+            navegador.
+          </p>
+          {!authSession.isConfigured ? (
+            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Configura `.env.local` con las variables VITE_FIREBASE_* para activar Auth.
+            </p>
+          ) : null}
+          {authSession.error ? (
+            <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              {authSession.error}
+            </p>
+          ) : null}
+          {authStatus ? (
+            <p className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+              {authStatus}
+            </p>
+          ) : null}
+        </div>
+
+        {authSession.user ? (
+          <div className="grid gap-3">
+            <div className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-sm font-medium text-slate-950">
+                {authSession.profile?.displayName || authSession.user.displayName || 'Usuario autenticado'}
+              </p>
+              <p className="text-sm text-slate-600">
+                {authSession.profile?.email || authSession.user.email}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {authSession.isLoading
+                  ? 'Cargando contexto remoto...'
+                  : remoteGroupLabel
+                    ? `Grupo por defecto: ${remoteGroupLabel}`
+                    : activeMemberships.length === 1
+                      ? `Un grupo remoto disponible: ${activeMemberships[0].groupName ?? activeMemberships[0].groupId}`
+                      : activeMemberships.length > 1
+                        ? `${activeMemberships.length} grupos remotos disponibles. El selector queda para la siguiente fase.`
+                        : 'Aun no tienes grupos remotos asignados. Puedes seguir usando el modo local.'}
+              </p>
+            </div>
+            <button
+              className="inline-flex h-10 w-fit items-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-400"
+              onClick={onSignOut}
+              type="button"
+            >
+              <LogOut size={16} /> Cerrar sesion
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            <button
+              className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              disabled={!authSession.isConfigured || authSession.isLoading}
+              onClick={onGoogleSignIn}
+              type="button"
+            >
+              <LogIn size={16} /> Entrar con Google
+            </button>
+            <form
+              className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-[1fr_1fr_auto_auto]"
+              onSubmit={(event) => {
+                event.preventDefault()
+                onEmailAuth(event.currentTarget, 'sign-in')
+              }}
+            >
+              <input
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-emerald-600"
+                name="email"
+                placeholder="Correo"
+                type="email"
+              />
+              <input
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-emerald-600"
+                name="password"
+                placeholder="Contrasena"
+                type="password"
+              />
+              <button
+                className="h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-800 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={!authSession.isConfigured || authSession.isLoading}
+                type="submit"
+              >
+                Entrar
+              </button>
+              <button
+                className="h-10 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                disabled={!authSession.isConfigured || authSession.isLoading}
+                onClick={(event) => {
+                  if (event.currentTarget.form) {
+                    onEmailAuth(event.currentTarget.form, 'register')
+                  }
+                }}
+                type="button"
+              >
+                Crear
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

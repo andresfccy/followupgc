@@ -150,9 +150,59 @@ Validation:
 - `pnpm build` passed.
 - `scripts/ai/verify.sh` passed.
 
+## 2026-05-26: Firebase Auth Phase 3 Implementation
+
+Firebase Phase 3 is implemented with Google Sign-In, email/password auth,
+minimal Firestore user profiles, and initial remote group context lookup.
+
+What changed:
+
+- Added the official `firebase` dependency.
+- Added `.env.example` for Vite Firebase configuration.
+- Updated `.gitignore` so `.env` and `.env.*` stay untracked while
+  `.env.example` remains committed.
+- Added `src/lib/firebase.ts` for environment-based Firebase initialization.
+- Added `src/lib/auth.ts` for Google Sign-In, email/password registration,
+  email/password sign-in, sign-out, auth observation, profile upsert, and
+  membership lookup.
+- Added `src/lib/useAuthSession.ts` for user, profile, `defaultGroupId`,
+  memberships, loading, error, and refresh state.
+- Added a compact session panel in `src/App.tsx`.
+- Added `docs/ai/firebase-auth-implementation.md`.
+- Updated `docs/ai/development-roadmap.md` and
+  `docs/ai/handoff/next-actions.md`.
+
+Firestore usage in this phase:
+
+- Creates or updates `users/{userId}` on sign-in with `uid`, `displayName`,
+  `email`, `createdAt`, and `updatedAt`.
+- Reads `users/{userId}/groupMemberships` to prepare future multi-group
+  context.
+- Does not create groups, memberships, members, meetings, attendance, pastoral
+  notes, imports, Storage objects, or Cloud Functions.
+
+Local-first boundary:
+
+- Zustand/localStorage remains the source for current group data.
+- Sign-in does not upload local members, meetings, attendance, notes, or import
+  data.
+- The app remains usable when Firebase is not configured or the user has no
+  remote groups.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Vite chunk-size warning after adding
+  Firebase SDK.
+- `scripts/ai/verify.sh` passed with the same Vite chunk-size warning.
+
 ## 2026-05-23: Firebase Hosting Static Deployment Config
 
-Firebase Hosting phase 1 is configured for static SPA deployment only.
+Firebase Hosting phase 1 is complete. FollowUpGC is deployed as a static SPA at:
+
+```txt
+https://followupgc.web.app
+```
 
 What changed:
 
@@ -165,6 +215,43 @@ What changed:
 No runtime Firebase SDK, Auth, Firestore, Storage, Cloud Functions, cloud sync,
 or XLSX processing was added. The app remains local-first with Zustand persist
 and `localStorage`.
+
+Redeploy command:
+
+```bash
+pnpm build
+firebase deploy --only hosting
+```
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed.
+- `scripts/ai/verify.sh` passed.
+
+## 2026-05-26: Firebase Auth And Firestore Phase 2 Design
+
+Firebase Phase 2 is documented as a design-only phase for Auth, Firestore,
+multi-group support, roles, default groups, migration, privacy, and future XLSX
+processing.
+
+What changed:
+
+- Added `docs/ai/firebase-auth-firestore-plan.md` with the recommended Firebase
+  Auth + Firestore architecture.
+- Added `docs/ai/development-roadmap.md` as the central backlog and phase
+  tracker.
+- The design recommends Firebase Auth plus Firestore as an optional remote
+  layer while preserving local-only mode.
+- Multi-group access is modeled with `groups/{groupId}` and per-group
+  memberships.
+- `users/{userId}.defaultGroupId` is a user preference, not an authorization
+  grant.
+- Role boundaries are defined for `owner`, `leader`, and `viewer`.
+- LocalStorage migration must be manual and confirmed before any data upload.
+
+No Firebase SDK, Auth, Firestore, Storage, Cloud Functions, XLSX parser, source
+code, or runtime behavior was implemented in this phase.
 
 Validation:
 

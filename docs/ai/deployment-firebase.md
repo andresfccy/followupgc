@@ -1,9 +1,17 @@
 # Firebase Hosting Deployment
 
-FollowUpGC is deployed to Firebase Hosting as a static Vite SPA. This phase
-does not add Firebase SDK, Auth, Firestore, Storage, Cloud Functions, or remote
-sync. Runtime data remains local-first in browser `localStorage` through
-Zustand persist.
+FollowUpGC is deployed to Firebase Hosting as a static Vite SPA.
+
+Production URL:
+
+```txt
+https://followupgc.web.app
+```
+
+Firebase Hosting Phase 1 is complete. This phase does not add Firebase SDK,
+Auth, Firestore, Storage, Cloud Functions, XLSX processing, or remote sync.
+Runtime data remains local-first in browser `localStorage` through Zustand
+persist.
 
 ## Files
 
@@ -72,6 +80,13 @@ pnpm build
 firebase deploy --only hosting
 ```
 
+Current production redeploy command:
+
+```bash
+pnpm build
+firebase deploy --only hosting
+```
+
 ## Validation Before Deploy
 
 Run:
@@ -92,6 +107,9 @@ scripts/ai/verify.sh
 - XLSX processing.
 - Remote persistence or cloud sync.
 - TanStack Router wiring.
+
+These remain future phases. The current deployed app still persists data only in
+the user's browser through Zustand/localStorage.
 
 ## Next Firebase Phase
 
