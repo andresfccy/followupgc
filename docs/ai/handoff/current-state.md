@@ -196,6 +196,60 @@ Validation:
   Firebase SDK.
 - `scripts/ai/verify.sh` passed with the same Vite chunk-size warning.
 
+## 2026-05-29: Firebase Phase 4 Remote Groups And Memberships
+
+Firebase Phase 4 is implemented as a minimal remote multi-group layer. It does
+not migrate local FollowUpGC data.
+
+What changed:
+
+- Added `src/lib/remoteGroups.ts` as the repository-style Firestore layer for
+  remote group creation, user group membership lookup, and `defaultGroupId`
+  updates.
+- Added remote group and membership types:
+  `RemoteGroup`, `GroupRole`, `GroupMembership`, and `UserGroupMembership`.
+- Group creation writes `groups/{groupId}`,
+  `groups/{groupId}/memberships/{uid}`,
+  `users/{uid}/groupMemberships/{groupId}`, and updates
+  `users/{uid}.defaultGroupId` only when the user did not already have one.
+- Updated `src/lib/useAuthSession.ts` to expose active memberships, current
+  remote group, valid default membership, and a local current-group selector.
+- Updated `src/App.tsx` session panel with signed-in group context, first group
+  creation, active group list, current group switching, and default group
+  updates.
+- Added `firestore.rules` and wired it through `firebase.json`.
+- Added `docs/ai/firebase-groups-memberships.md`.
+- Updated the roadmap and next actions for Phase 5.
+
+Security and privacy:
+
+- Firestore rules do not allow public access.
+- `defaultGroupId` is treated as a preference and must match active
+  authoritative membership before it is used.
+- User membership lookup records must mirror the authoritative group
+  membership.
+- Owner/leader/viewer role boundaries are reserved for future remote group
+  data.
+- No member, meeting, attendance, pastoral note, import, or document-id data is
+  uploaded.
+
+Remaining risk:
+
+- Firestore rules have not been covered by emulator tests yet.
+- Viewer access to future member documents still needs a sanitized projection
+  or stricter role decision before uploading sensitive member data.
+- Rules do not yet protect against removing the last owner.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Vite chunk-size warning after Firebase.
+- `scripts/ai/verify.sh` passed with the same Vite chunk-size warning.
+- `pnpm dev -- --host 127.0.0.1` started successfully after sandbox approval;
+  `curl -L http://localhost:5173/` returned the Vite HTML shell. Full
+  Firebase sign-in/group creation still needs configured `.env.local` values
+  and browser interaction.
+
 ## 2026-05-23: Firebase Hosting Static Deployment Config
 
 Firebase Hosting phase 1 is complete. FollowUpGC is deployed as a static SPA at:

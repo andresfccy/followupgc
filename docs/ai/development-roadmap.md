@@ -9,9 +9,10 @@ https://followupgc.web.app
 ```
 
 The production app remains local-first. Runtime group data is stored in the
-browser through Zustand persist and `localStorage`. Firebase Auth is now
-implemented for Google Sign-In and email/password, with minimal Firestore user
-profiles. Group data, Storage, Cloud Functions, cloud sync, and real XLSX
+browser through Zustand persist and `localStorage`. Firebase Auth is implemented
+for Google Sign-In and email/password. Firestore now stores minimal remote group
+identity, group memberships, user group lookup records, and `defaultGroupId`.
+Pastoral group data, Storage, Cloud Functions, cloud sync, and real XLSX
 parsing are not implemented yet.
 
 ## Completed Phases
@@ -79,24 +80,33 @@ Tasks:
 - Added signed-in empty state for users without remote groups.
 - Avoided writing local group data remotely.
 
-## Current Phase
-
 ### Phase 4 - Firestore Data Model + Security Rules
 
-Status: Planned
+Status: Completed
 
 Tasks:
 
-- Add Firestore collections from the approved model.
-- Add group creation.
-- Add first-owner membership creation.
-- Add `users/{userId}/groupMemberships/{groupId}` lookup records.
-- Add group selector.
-- Add `defaultGroupId` validation flow.
-- Write Firestore security rules.
-- Add Firebase Emulator tests for owner, leader, viewer, inactive member, and
+- Added the minimal remote group model for:
+  `groups/{groupId}`, `groups/{groupId}/memberships/{userId}`,
+  `users/{userId}/groupMemberships/{groupId}`, and
+  `users/{userId}.defaultGroupId`.
+- Added group creation for authenticated users.
+- Added first-owner membership creation.
+- Added `users/{userId}/groupMemberships/{groupId}` lookup records.
+- Added a basic group selector in the existing session panel.
+- Added `defaultGroupId` validation against active memberships.
+- Added initial Firestore security rules and wired them through `firebase.json`.
+- Documented model and manual checks in
+  `docs/ai/firebase-groups-memberships.md`.
+
+Not completed in this phase:
+
+- Firebase Emulator tests for owner, leader, viewer, inactive member, and
   unauthenticated access.
-- Decide whether viewer access needs sanitized member projections.
+- Final viewer data projection decision.
+- Local data migration or remote sync.
+
+## Current Phase
 
 ### Phase 5 - LocalStorage To Firestore Migration
 
@@ -150,26 +160,25 @@ Tasks:
 
 - Design signed-in first-run flow.
 - Design local-only versus cloud-enabled mode selection.
-- Design group selector for users with multiple groups.
-- Design default group setting.
+- Refine the basic group selector for users with multiple groups.
+- Refine default group settings after owner-managed assignments exist.
 - Design role management UI for owners.
 - Design viewer experience and decide whether viewer sees sensitive fields.
 - Design clear privacy copy before uploading local data.
 
 ### Data And Architecture
 
-- Approve Firestore collection structure.
-- Decide whether `users/{userId}/groupMemberships/{groupId}` is required for
-  v1.
-- Define repository boundaries before adding Firebase calls.
+- Extend Firestore collection structure for real remote group data after
+  migration scope is approved.
+- Keep `users/{userId}/groupMemberships/{groupId}` as the v1 user lookup.
+- Keep Firebase reads/writes behind repository-style functions.
 - Define remote error handling and retry behavior.
 - Define migration conflict format.
 - Decide if local member `notes` becomes pastoral notes subcollection records.
 
 ### Security And Privacy
 
-- Write conceptual allow/deny matrix for all roles.
-- Add production Firestore rules only after tests are defined.
+- Add emulator tests for the initial Firestore rules.
 - Add emulator tests for document id and pastoral note access.
 - Decide viewer access to `documentId`.
 - Decide whether remote offline persistence is enabled.
@@ -185,8 +194,8 @@ Tasks:
 ## Open Decisions
 
 - Whether local-only mode remains the default path after Auth exists.
-- Whether single-group users get `defaultGroupId` set automatically or through
-  confirmation.
+- Whether single-group users without `defaultGroupId` should be prompted more
+  prominently to save a default.
 - Whether viewers can read full member records or need sanitized projections.
 - Whether Firestore offline persistence is acceptable for sensitive remote
   data.
@@ -211,13 +220,12 @@ Tasks:
 
 ## Definition Of Done For Current Phase
 
-Phase 4 is done only when:
+Phase 5 is done only when:
 
-- Firestore rules are written for profiles, groups, memberships, members,
-  meetings, attendance, and pastoral notes.
-- Rules are tested with owner, leader, viewer, inactive member, and signed-out
-  access cases.
-- Group creation creates a first owner membership.
-- `defaultGroupId` is validated against active membership.
-- A basic group selector exists for users with multiple active groups.
-- Local group data is still not migrated automatically.
+- A migration preview reads current `followupgc-data` without uploading it.
+- The user explicitly chooses a destination remote group or creates a new one.
+- The user confirms before any member, meeting, attendance, note, import, or
+  document-id data is written to Firestore.
+- The preview reports counts and likely conflicts before writing.
+- Migration writes are limited to groups where the user is `owner` or `leader`.
+- Local-only data remains available after migration.

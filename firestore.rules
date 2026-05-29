@@ -1,0 +1,191 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function membershipPath(groupId, userId) {
+      return /databases/$(database)/documents/groups/$(groupId)/memberships/$(userId);
+    }
+
+    function hasActiveMembership(groupId, userId) {
+      return exists(membershipPath(groupId, userId)) &&
+        get(membershipPath(groupId, userId)).data.status == 'active';
+    }
+
+    function hasActiveMembershipAfter(groupId, userId) {
+      return existsAfter(membershipPath(groupId, userId)) &&
+        getAfter(membershipPath(groupId, userId)).data.status == 'active';
+    }
+
+    function roleFor(groupId, userId) {
+      return get(membershipPath(groupId, userId)).data.role;
+    }
+
+    function isActiveMember(groupId) {
+      return isSignedIn() && hasActiveMembership(groupId, request.auth.uid);
+    }
+
+    function isOwner(groupId) {
+      return isActiveMember(groupId) && roleFor(groupId, request.auth.uid) == 'owner';
+    }
+
+    function isLeaderOrOwner(groupId) {
+      return isActiveMember(groupId) &&
+        roleFor(groupId, request.auth.uid) in ['owner', 'leader'];
+    }
+
+    function validRole(role) {
+      return role in ['owner', 'leader', 'viewer'];
+    }
+
+    function validMembershipStatus(status) {
+      return status in ['active', 'inactive'];
+    }
+
+    function validUserProfileFields(userId) {
+      return request.resource.data.keys().hasOnly([
+        'uid',
+        'displayName',
+        'email',
+        'defaultGroupId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.uid == userId;
+    }
+
+    function validDefaultGroupCreate(userId) {
+      return !('defaultGroupId' in request.resource.data) ||
+        hasActiveMembershipAfter(request.resource.data.defaultGroupId, userId);
+    }
+
+    function validDefaultGroupUpdate(userId) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['defaultGroupId']) ||
+      (!('defaultGroupId' in request.resource.data) ||
+        hasActiveMembershipAfter(request.resource.data.defaultGroupId, userId));
+    }
+
+    function validGroupCreate() {
+      return request.resource.data.keys().hasOnly([
+        'name',
+        'regularWeekday',
+        'createdBy',
+        'createdAt',
+        'updatedAt',
+        'archivedAt'
+      ]) &&
+      request.resource.data.name is string &&
+      request.resource.data.name.size() > 0 &&
+      request.resource.data.createdBy == request.auth.uid &&
+      (!('regularWeekday' in request.resource.data) ||
+        request.resource.data.regularWeekday in [0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    function validMembershipDoc(groupId, userId) {
+      return request.resource.data.keys().hasOnly([
+        'groupId',
+        'userId',
+        'role',
+        'displayName',
+        'email',
+        'joinedAt',
+        'status'
+      ]) &&
+      request.resource.data.groupId == groupId &&
+      request.resource.data.userId == userId &&
+      validRole(request.resource.data.role) &&
+      validMembershipStatus(request.resource.data.status);
+    }
+
+    function validUserMembershipMirror(userId, groupId) {
+      return request.resource.data.keys().hasOnly([
+        'groupId',
+        'userId',
+        'groupName',
+        'role',
+        'displayName',
+        'email',
+        'joinedAt',
+        'status',
+        'updatedAt'
+      ]) &&
+      request.resource.data.groupId == groupId &&
+      request.resource.data.userId == userId &&
+      existsAfter(membershipPath(groupId, userId)) &&
+      request.resource.data.role == getAfter(membershipPath(groupId, userId)).data.role &&
+      request.resource.data.status == getAfter(membershipPath(groupId, userId)).data.status;
+    }
+
+    match /users/{userId} {
+      allow read: if isSelf(userId);
+      allow create: if isSelf(userId) &&
+        validUserProfileFields(userId) &&
+        validDefaultGroupCreate(userId);
+      allow update: if isSelf(userId) &&
+        validUserProfileFields(userId) &&
+        validDefaultGroupUpdate(userId);
+      allow delete: if false;
+
+      match /groupMemberships/{groupId} {
+        allow read: if isSelf(userId);
+        allow create, update: if isSignedIn() &&
+          (isSelf(userId) || isOwner(groupId)) &&
+          validUserMembershipMirror(userId, groupId);
+        allow delete: if isSignedIn() && isOwner(groupId);
+      }
+    }
+
+    match /groups/{groupId} {
+      allow read: if isActiveMember(groupId);
+      allow create: if isSignedIn() && validGroupCreate();
+      allow update: if isOwner(groupId) &&
+        request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if false;
+
+      match /memberships/{userId} {
+        allow read: if isSelf(userId) || isActiveMember(groupId);
+        allow create: if isSignedIn() &&
+          validMembershipDoc(groupId, userId) &&
+          (
+            isOwner(groupId) ||
+            (
+              isSelf(userId) &&
+              request.resource.data.role == 'owner' &&
+              request.resource.data.status == 'active' &&
+              getAfter(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid
+            )
+          );
+        allow update: if isOwner(groupId) && validMembershipDoc(groupId, userId);
+        allow delete: if isOwner(groupId);
+      }
+
+      // Future remote data. Phase 4 intentionally does not write these
+      // collections; rules reserve owner/leader writes and active member reads.
+      match /members/{memberId} {
+        allow read: if isActiveMember(groupId);
+        allow create, update, delete: if isLeaderOrOwner(groupId);
+
+        match /pastoralNotes/{noteId} {
+          allow read, create, update, delete: if isLeaderOrOwner(groupId);
+        }
+      }
+
+      match /meetings/{meetingId} {
+        allow read: if isActiveMember(groupId);
+        allow create, update, delete: if isLeaderOrOwner(groupId);
+
+        match /attendance/{memberId} {
+          allow read: if isActiveMember(groupId);
+          allow create, update, delete: if isLeaderOrOwner(groupId);
+        }
+      }
+    }
+  }
+}

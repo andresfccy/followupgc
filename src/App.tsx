@@ -28,6 +28,7 @@ import {
   signOutCurrentUser,
 } from '@/lib/auth'
 import { parseImportFile } from '@/lib/memberImport'
+import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { cn } from '@/lib/utils'
 import { useGroupStore } from '@/store/groupStore'
@@ -198,6 +199,66 @@ function App() {
     }
   }
 
+  async function handleCreateRemoteGroup(formElement: HTMLFormElement) {
+    setAuthStatus('')
+
+    if (!authSession.user) {
+      setAuthStatus('Inicia sesion antes de crear un grupo remoto.')
+      return
+    }
+
+    const form = new FormData(formElement)
+    const name = String(form.get('groupName') ?? '').trim()
+
+    try {
+      const membership = await createRemoteGroup(authSession.user, {
+        name,
+        regularWeekday: settings.meetingWeekday,
+        makeDefault: !authSession.defaultGroupId,
+      })
+
+      authSession.selectGroup(membership.groupId)
+      await authSession.refresh()
+      formElement.reset()
+      setAuthStatus(
+        !authSession.defaultGroupId
+          ? 'Grupo remoto creado. Quedaste como owner y se guardo como predeterminado.'
+          : 'Grupo remoto creado. Quedaste como owner.',
+      )
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo crear el grupo remoto.')
+    }
+  }
+
+  async function handleSetDefaultGroup(groupId: string) {
+    setAuthStatus('')
+
+    if (!authSession.user) {
+      setAuthStatus('Inicia sesion antes de cambiar el grupo predeterminado.')
+      return
+    }
+
+    const hasActiveMembership = authSession.activeMemberships.some(
+      (membership) => membership.groupId === groupId,
+    )
+
+    if (!hasActiveMembership) {
+      setAuthStatus('No se puede usar como predeterminado un grupo sin membership activa.')
+      return
+    }
+
+    try {
+      await setDefaultGroupId(authSession.user.uid, groupId)
+      authSession.selectGroup(groupId)
+      await authSession.refresh()
+      setAuthStatus('Grupo predeterminado actualizado.')
+    } catch (error) {
+      setAuthStatus(
+        error instanceof Error ? error.message : 'No se pudo actualizar el grupo predeterminado.',
+      )
+    }
+  }
+
   return (
     <main className="min-h-svh bg-stone-50 text-slate-950">
       <section className="border-b border-slate-200 bg-white">
@@ -223,8 +284,11 @@ function App() {
           <AuthPanel
             authSession={authSession}
             authStatus={authStatus}
+            localGroupName={settings.groupName}
             onEmailAuth={handleEmailAuth}
+            onCreateRemoteGroup={handleCreateRemoteGroup}
             onGoogleSignIn={handleGoogleSignIn}
+            onSetDefaultGroup={handleSetDefaultGroup}
             onSignOut={handleSignOut}
           />
         </div>
@@ -441,24 +505,25 @@ function App() {
 function AuthPanel({
   authSession,
   authStatus,
+  localGroupName,
+  onCreateRemoteGroup,
   onEmailAuth,
   onGoogleSignIn,
+  onSetDefaultGroup,
   onSignOut,
 }: {
   authSession: AuthSession
   authStatus: string
+  localGroupName: string
+  onCreateRemoteGroup: (formElement: HTMLFormElement) => void
   onEmailAuth: (formElement: HTMLFormElement, mode: 'register' | 'sign-in') => void
   onGoogleSignIn: () => void
+  onSetDefaultGroup: (groupId: string) => void
   onSignOut: () => void
 }) {
-  const activeMemberships = authSession.memberships.filter(
-    (membership) => membership.status === 'active',
-  )
-  const remoteGroupLabel = authSession.activeDefaultMembership?.groupName
-    ? authSession.activeDefaultMembership.groupName
-    : authSession.defaultGroupId
-      ? `Grupo remoto ${authSession.defaultGroupId}`
-      : ''
+  const activeMemberships = authSession.activeMemberships
+  const currentMembership = authSession.currentMembership
+  const defaultGroupIsInvalid = Boolean(authSession.defaultGroupId && !authSession.activeDefaultMembership)
 
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -466,8 +531,8 @@ function AuthPanel({
         <div>
           <p className="text-sm font-semibold text-slate-950">Sesion Firebase</p>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            La autenticacion prepara perfil y grupo remoto. Los datos pastorales siguen en este
-            navegador.
+            La autenticacion prepara perfil y grupo remoto. Los miembros y reuniones siguen
+            guardados localmente por ahora.
           </p>
           {!authSession.isConfigured ? (
             <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -489,6 +554,7 @@ function AuthPanel({
         {authSession.user ? (
           <div className="grid gap-3">
             <div className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-xs font-medium uppercase text-emerald-700">Sesion iniciada</p>
               <p className="text-sm font-medium text-slate-950">
                 {authSession.profile?.displayName || authSession.user.displayName || 'Usuario autenticado'}
               </p>
@@ -498,15 +564,100 @@ function AuthPanel({
               <p className="mt-2 text-sm text-slate-600">
                 {authSession.isLoading
                   ? 'Cargando contexto remoto...'
-                  : remoteGroupLabel
-                    ? `Grupo por defecto: ${remoteGroupLabel}`
-                    : activeMemberships.length === 1
-                      ? `Un grupo remoto disponible: ${activeMemberships[0].groupName ?? activeMemberships[0].groupId}`
-                      : activeMemberships.length > 1
-                        ? `${activeMemberships.length} grupos remotos disponibles. El selector queda para la siguiente fase.`
-                        : 'Aun no tienes grupos remotos asignados. Puedes seguir usando el modo local.'}
+                  : currentMembership
+                    ? `Grupo remoto actual: ${currentMembership.groupName ?? currentMembership.groupId}`
+                    : activeMemberships.length > 1
+                      ? 'Selecciona un grupo remoto para esta sesion.'
+                      : 'No tienes grupos remotos todavía.'}
+              </p>
+              {authSession.defaultGroupId ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  DefaultGroupId:{' '}
+                  {defaultGroupIsInvalid
+                    ? 'no se usa porque no tiene membership activa.'
+                    : authSession.defaultGroupId}
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+              <p className="text-sm font-medium text-slate-950">
+                Los miembros y reuniones siguen guardados localmente por ahora
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Esta fase solo crea identidad remota de grupo y memberships. No sube bitacoras,
+                asistencias ni documentos.
               </p>
             </div>
+            {activeMemberships.length ? (
+              <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3">
+                <p className="text-sm font-medium text-slate-950">Grupos remotos</p>
+                {activeMemberships.map((membership) => {
+                  const isCurrent = membership.groupId === authSession.currentGroupId
+                  const isDefault = membership.groupId === authSession.defaultGroupId
+
+                  return (
+                    <div
+                      className={cn(
+                        'grid gap-2 rounded-md border p-3 sm:grid-cols-[1fr_auto] sm:items-center',
+                        isCurrent ? 'border-emerald-600 bg-emerald-50' : 'border-slate-200',
+                      )}
+                      key={membership.groupId}
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-950">
+                          {membership.groupName ?? membership.groupId}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          {membership.role} · {isDefault ? 'predeterminado' : 'membership activa'}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:border-emerald-600"
+                          onClick={() => authSession.selectGroup(membership.groupId)}
+                          type="button"
+                        >
+                          {isCurrent ? 'Actual' : 'Usar'}
+                        </button>
+                        {!isDefault ? (
+                          <button
+                            className="h-9 rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-700"
+                            onClick={() => onSetDefaultGroup(membership.groupId)}
+                            type="button"
+                          >
+                            Hacer default
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <form
+                className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_auto]"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  onCreateRemoteGroup(event.currentTarget)
+                }}
+              >
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Nombre del primer grupo remoto
+                  <input
+                    className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 outline-none focus:border-emerald-600"
+                    defaultValue={localGroupName}
+                    name="groupName"
+                  />
+                </label>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                  disabled={authSession.isLoading}
+                  type="submit"
+                >
+                  <Plus size={16} /> Crear mi primer grupo
+                </button>
+              </form>
+            )}
             <button
               className="inline-flex h-10 w-fit items-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-400"
               onClick={onSignOut}

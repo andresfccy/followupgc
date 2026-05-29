@@ -31,10 +31,15 @@
   testing.
 - Enable Google and Email/Password providers in Firebase Console before
   testing sign-in against the production Firebase project.
-- Before implementing Firestore, write emulator-tested rules for owner, leader,
-  viewer, inactive member, and unauthenticated access.
-- Next Firebase implementation should focus on Phase 4: Firestore rules, group
-  creation, first owner membership, `defaultGroupId` validation, and a basic
-  group selector.
+- Firebase Phase 4 now has minimal remote groups, first-owner memberships,
+  user group lookup records, `defaultGroupId` validation, a basic selector, and
+  initial Firestore rules.
+- Add emulator tests for the Phase 4 rules before storing real pastoral data in
+  Firestore. Cover owner, leader, viewer, inactive member, and signed-out
+  access cases.
+- Review viewer access before remote member sync because Firestore rules cannot
+  hide individual fields such as `documentId` inside readable documents.
+- Add owner-managed leader/viewer assignment before inviting or assigning more
+  users to a group.
 - Before remote migration, build an explicit localStorage migration preview and
   require user confirmation before uploading any local data.
