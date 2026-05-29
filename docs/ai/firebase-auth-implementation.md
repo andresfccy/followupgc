@@ -145,12 +145,15 @@ pnpm build
 firebase deploy --only hosting
 ```
 
-## Pending
+## Later Phases
 
-- Firestore production rules for user profiles and memberships.
-- Group creation.
-- First owner assignment.
-- Complete group selector.
+- Firestore production rules for user profiles, groups, memberships, and
+  future group data were added in Phase 4.
+- Group creation, first owner assignment, `defaultGroupId` validation, and a
+  basic group selector were added in Phase 4.
+- Firestore Rules tests were added in Phase 4.5.
+- Run `pnpm test:rules` in an environment with Java installed before migrating
+  real pastoral data.
 - LocalStorage to Firestore migration preview.
 - Remote sync of members, meetings, attendance, and pastoral notes.
 - Firebase Storage, Cloud Functions, and XLSX processing.

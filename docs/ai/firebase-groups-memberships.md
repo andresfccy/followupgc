@@ -117,7 +117,8 @@ Initial rule intent:
 
 Known limitations before remote pastoral data is stored:
 
-- Rules do not yet have emulator test coverage in this repo.
+- Rules have emulator test coverage in `tests/firestore.rules.test.mjs`, but
+  the suite must be run in an environment with Java installed.
 - Rules cannot hide individual fields from readable Firestore documents, so
   viewer access to future member documents that include `documentId` still
   needs a sanitized projection or a stricter access decision.
@@ -159,6 +160,11 @@ Known limitations before remote pastoral data is stored:
 
 - Add emulator-backed Firestore rule tests before storing real pastoral data.
 - Design owner-managed leader/viewer assignment.
-- Build an explicit localStorage migration preview with user confirmation.
+- Use the official church Excel file as the first real production data source:
+  parser/normalization, mandatory preview, explicit confirmation, and
+  controlled Firestore writes.
+- Treat localStorage to Firestore migration as deferred/optional. Revisit only
+  if users have real local data to preserve; do not migrate seeds, demo data,
+  local development data, or local test data.
 - Decide viewer access and sanitized member projections before uploading member
   records.

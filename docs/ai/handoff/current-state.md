@@ -250,6 +250,255 @@ Validation:
   Firebase sign-in/group creation still needs configured `.env.local` values
   and browser interaction.
 
+## 2026-05-29: Firebase Phase 4.5 Firestore Rules Tests
+
+Firebase Phase 4.5 adds automated Firestore Rules tests as the security gate
+before any sensitive Firestore writes.
+
+What changed:
+
+- Added `@firebase/rules-unit-testing` as a dev dependency.
+- Added Firestore Emulator config to `firebase.json`.
+- Added `pnpm test:rules`.
+- Added `tests/firestore.rules.test.mjs` using Node's built-in test runner.
+- Added `docs/ai/firestore-rules-testing.md`.
+- Updated `docs/ai/development-roadmap.md`,
+  `docs/ai/handoff/next-actions.md`, and
+  `docs/ai/firebase-auth-implementation.md`.
+
+Rules coverage:
+
+- Signed-out denied for profiles, groups, group creation, and memberships.
+- Users can only read/write their own profile.
+- Invalid `defaultGroupId` is denied without active authoritative membership.
+- Valid `defaultGroupId` is allowed with active authoritative membership.
+- Valid group creation and same-batch initial owner membership are allowed.
+- Group creation with another `createdBy` is denied.
+- Initial owner membership for another user is denied.
+- Later self-owner membership on an existing group is denied.
+- Active owner/leader/viewer can read groups under current rules.
+- Inactive and unaffiliated users cannot read groups.
+- Fake membership mirrors are denied.
+- Mirrors must match authoritative role and status.
+- Only owners can change membership roles/statuses.
+- Viewer, inactive, and unaffiliated users cannot write future group data.
+
+Rules change:
+
+- The initial self-owner membership condition now requires the group to not
+  exist before the request and to be created in the same batch. This prevents a
+  `createdBy` user without current membership from later re-creating an owner
+  membership on an existing group.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Vite chunk-size warning after Firebase.
+- `scripts/ai/verify.sh` passed with the same Vite chunk-size warning.
+- `pnpm test:rules` passed locally with Java 21+.
+- Rules tests executed: 17.
+- Rules tests approved: 17.
+- Rules tests failed: 0.
+- Rules tests cancelled: 0.
+- Rules tests omitted: 0.
+- `pnpm test:rules` exit code: 0.
+- Firestore Emulator started and shut down correctly.
+
+Remaining risk:
+
+- Last-owner protection is still not implemented. Firestore Rules cannot
+  reliably count remaining owners; handle this later with controlled
+  transactional writes and possibly Cloud Functions.
+- Viewer access to future member documents with `documentId` must be defined
+  before migrating members.
+- Rules for `members`, `meetings`, `attendance`, and `pastoralNotes` have not
+  been fully tested because those collections are not migrated or written yet.
+- Membership mirrors must remain synchronized with the authoritative
+  `groups/{groupId}/memberships/{uid}` records.
+- Re-run and extend rules tests whenever new remote collections are added.
+- Do not start any sensitive Firestore import or migration if
+  `pnpm test:rules` fails.
+
+## 2026-05-29: Initial Production Data Source Decision
+
+Product decision: the first real production data load will come from the
+official church Excel file, not from localStorage.
+
+Decision:
+
+- localStorage is not the production source right now.
+- localStorage remains available as local/demo/fallback mode.
+- localStorage will not be migrated automatically.
+- Seeds, demo data, local development data, and local test data must not be
+  migrated as production data.
+- localStorage to Firestore migration is deferred and optional. Revisit it only
+  if users have real local data that must be preserved.
+
+Approved production import direction:
+
+```txt
+Excel oficial de la iglesia
+-> parser/normalizacion
+-> preview obligatorio
+-> confirmacion explicita
+-> escritura controlada en Firestore
+```
+
+What changed in planning:
+
+- `docs/ai/development-roadmap.md` now makes Phase 5A the Excel -> Firestore
+  initial import design.
+- Added `docs/ai/excel-to-firestore-initial-import-plan.md`.
+- The next implementation step is Phase 5B: implement the local XLSX parser
+  behind the existing `parseImportFile(file): Promise<ImportPreview>` contract.
+
+Constraints for the next phases:
+
+- Import must require a remote destination group.
+- `defaultGroupId` can preselect, but permission must come from authoritative
+  membership.
+- Only `owner` and `leader` should import.
+- `viewer` must not import.
+- Preview and explicit confirmation are mandatory before writes.
+- Do not upload or store the original Excel file.
+- Before writing real members, define remote member/private profile model,
+  rules, and rules tests.
+- `pnpm test:rules` must pass before writing sensitive data.
+
+Remaining risk:
+
+- Viewer access over members with `documentId` must be designed before member
+  migration/import writes.
+- Last-owner protection remains unresolved.
+- Membership mirrors must stay synchronized with authoritative memberships.
+- Rules must be extended and re-tested when member/private profile collections
+  are added.
+
+## 2026-05-29: Firebase Phase 5B Backend XLSX Processing To Preview
+
+Phase 5B moves XLSX processing to Firebase backend/serverless. The frontend no
+longer owns XLSX parsing.
+
+What changed:
+
+- Added Firebase Functions TypeScript project under `functions/`.
+- Added backend dependencies in `functions/package.json`:
+  `firebase-admin`, `firebase-functions`, and `xlsx`.
+- Added `processChurchXlsxImport`, a Storage finalize trigger for:
+  `imports/{groupId}/{importRunId}/source.xlsx`.
+- Added Firebase Storage runtime initialization in `src/lib/firebase.ts`.
+- Added `src/lib/remoteImports.ts` for creating importRuns, uploading XLSX to
+  Storage, and subscribing to importRun/previewRows.
+- Updated `src/App.tsx` import UI to upload XLSX and show backend status,
+  summary, errors, and preview rows.
+- Added `storage.rules`.
+- Updated `firebase.json` with Functions, Storage rules, and emulators.
+- Updated `firestore.rules` and `tests/firestore.rules.test.mjs` for
+  importRuns.
+- Added `docs/ai/firebase-xlsx-backend-processing.md`.
+
+Implemented flow:
+
+```txt
+owner/leader creates importRun
+-> frontend uploads XLSX to Storage
+-> Cloud Function marks processing
+-> Cloud Function reads first sheet
+-> validates required columns
+-> normalizes rows
+-> writes summary/errors/previewRows
+-> marks preview_ready or failed
+```
+
+Storage path:
+
+```txt
+imports/{groupId}/{importRunId}/source.xlsx
+```
+
+Firestore paths:
+
+```txt
+groups/{groupId}/importRuns/{importRunId}
+groups/{groupId}/importRuns/{importRunId}/previewRows/{rowId}
+```
+
+Not implemented:
+
+- Final confirmed member writes.
+- Member private profile model.
+- Remote members as app source of truth.
+- Meetings, attendance, or pastoral notes in Firestore.
+- localStorage migration.
+- Storage Rules tests.
+
+Validation status:
+
+- `pnpm lint` passed after adding Functions source.
+- `pnpm build` passed with the existing Vite chunk-size warning.
+- `scripts/ai/verify.sh` passed with the same Vite chunk-size warning.
+- `functions`: `./node_modules/.bin/tsc` passed.
+- At the time of the Phase 5B handoff, `pnpm test:rules` was not run because
+  Java was not visible on `PATH`; Phase 5C later validated Java 21.0.11 and
+  passing rules tests.
+- `functions pnpm install` completed dependency installation but returned
+  `ERR_PNPM_IGNORED_BUILDS` because pnpm blocked build scripts for
+  `@firebase/util` and `protobufjs`.
+
+Remaining risk:
+
+- Storage file retention/deletion is not finalized.
+- Update detection is limited until the member private profile model exists;
+  the function checks `memberPrivateProfiles.documentIdHash` if present.
+- Cloud Functions/Storage production deploy may require Blaze plan.
+- Phase 5C rules/tests now gate final member writes.
+
+## 2026-05-29: Firebase Phase 5C Rules, Storage Tests, And Member Security Model
+
+Phase 5C prepares the remote member security model before confirmed imported
+member writes. It does not write final members.
+
+What changed:
+
+- Added/updated Firestore Rules for:
+  `groups/{groupId}/members/{memberId}` and
+  `groups/{groupId}/members/{memberId}/private/profile`.
+- Public member docs allow `firstName`, `lastName`, `fullName`, operational
+  import fields, and `documentIdHash`; they reject full `documentId`.
+- Private profile docs can hold `documentId`, `phone`, and `birthday` and are
+  restricted to active `owner`/`leader`.
+- `previewRows` remain client-read only for active `owner`/`leader`; client
+  writes are denied because Cloud Functions/Admin SDK writes preview data.
+- Storage Rules now restrict XLSX uploads/reads to active `owner`/`leader`,
+  limit uploads to 20 MB, require XLSX-compatible content type, and deny client
+  overwrite/delete.
+- Added Storage Rules tests in `tests/storage.rules.test.mjs`.
+- Expanded Firestore Rules tests in `tests/firestore.rules.test.mjs` for
+  previewRows, public members, private profiles, and role boundaries.
+- Added `docs/ai/firestore-members-security-model.md`.
+
+Validation status:
+
+- Java detected: OpenJDK 21.0.11.
+- `pnpm lint` passed.
+- `pnpm build` passed with the known Vite chunk-size warning.
+- `pnpm test:rules` passed: 27 tests executed, 27 passed, 0 failed.
+- `pnpm test:storage-rules` passed: 4 tests executed, 4 passed, 0 failed.
+- `scripts/ai/verify.sh` passed with the known Vite chunk-size warning.
+- Functions TypeScript build passed with `./node_modules/.bin/tsc`.
+
+Remaining risk:
+
+- Final confirmed import write is still not implemented.
+- Last-owner protection is still pending.
+- Viewer can read public member docs; this is safe only while full
+  `documentId`, phone, birthday, and pastoral notes stay out of that document.
+- Decide whether `documentIdHash` should remain viewer-readable before broad
+  production use.
+- Storage source file retention/deletion remains pending.
+- Meetings, attendance, and pastoral notes still need rules/tests before they
+  move remote.
+
 ## 2026-05-23: Firebase Hosting Static Deployment Config
 
 Firebase Hosting phase 1 is complete. FollowUpGC is deployed as a static SPA at:

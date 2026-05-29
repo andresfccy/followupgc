@@ -14,6 +14,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/groups/$(groupId)/memberships/$(userId);
     }
 
+    function groupPath(groupId) {
+      return /databases/$(database)/documents/groups/$(groupId);
+    }
+
     function hasActiveMembership(groupId, userId) {
       return exists(membershipPath(groupId, userId)) &&
         get(membershipPath(groupId, userId)).data.status == 'active';
@@ -39,6 +43,75 @@ service cloud.firestore {
     function isLeaderOrOwner(groupId) {
       return isActiveMember(groupId) &&
         roleFor(groupId, request.auth.uid) in ['owner', 'leader'];
+    }
+
+    function validImportRunCreate(groupId, importRunId) {
+      return request.resource.data.keys().hasOnly([
+        'groupId',
+        'startedBy',
+        'source',
+        'fileName',
+        'storagePath',
+        'status',
+        'startedAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.groupId == groupId &&
+      request.resource.data.startedBy == request.auth.uid &&
+      request.resource.data.source == 'church-xlsx' &&
+      request.resource.data.status == 'uploaded' &&
+      request.resource.data.storagePath is string &&
+      request.resource.data.storagePath == 'imports/' + groupId + '/' + importRunId + '/source.xlsx';
+    }
+
+    function validPublicMemberDoc() {
+      return request.resource.data.keys().hasOnly([
+        'firstName',
+        'lastName',
+        'fullName',
+        'gender',
+        'joinedAt',
+        'groupRole',
+        'semesterAttendances',
+        'isServer',
+        'isServing',
+        'status',
+        'documentIdHash',
+        'importedFrom',
+        'lastImportRunId',
+        'lastImportedAt',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.firstName is string &&
+      request.resource.data.firstName.size() > 0 &&
+      request.resource.data.lastName is string &&
+      request.resource.data.lastName.size() > 0 &&
+      request.resource.data.fullName is string &&
+      request.resource.data.fullName.size() > 0 &&
+      (!('gender' in request.resource.data) || request.resource.data.gender in ['F', 'M']) &&
+      (!('semesterAttendances' in request.resource.data) ||
+        (request.resource.data.semesterAttendances is int &&
+          request.resource.data.semesterAttendances >= 0)) &&
+      (!('isServer' in request.resource.data) || request.resource.data.isServer is bool) &&
+      (!('isServing' in request.resource.data) || request.resource.data.isServing is bool) &&
+      (!('status' in request.resource.data) ||
+        request.resource.data.status in ['active', 'process', 'inactive']) &&
+      (!('documentIdHash' in request.resource.data) ||
+        request.resource.data.documentIdHash is string);
+    }
+
+    function validPrivateProfileDoc() {
+      return request.resource.data.keys().hasOnly([
+        'documentId',
+        'phone',
+        'birthday',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      (!('documentId' in request.resource.data) || request.resource.data.documentId is string) &&
+      (!('phone' in request.resource.data) || request.resource.data.phone is string) &&
+      (!('birthday' in request.resource.data) || request.resource.data.birthday is string);
     }
 
     function validRole(role) {
@@ -159,21 +232,38 @@ service cloud.firestore {
               isSelf(userId) &&
               request.resource.data.role == 'owner' &&
               request.resource.data.status == 'active' &&
-              getAfter(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid
+              !exists(groupPath(groupId)) &&
+              getAfter(groupPath(groupId)).data.createdBy == request.auth.uid
             )
           );
         allow update: if isOwner(groupId) && validMembershipDoc(groupId, userId);
         allow delete: if isOwner(groupId);
       }
 
-      // Future remote data. Phase 4 intentionally does not write these
-      // collections; rules reserve owner/leader writes and active member reads.
+      match /importRuns/{importRunId} {
+        allow read: if isLeaderOrOwner(groupId);
+        allow create: if isLeaderOrOwner(groupId) && validImportRunCreate(groupId, importRunId);
+        allow update, delete: if false;
+
+        match /previewRows/{rowId} {
+          allow read: if isLeaderOrOwner(groupId);
+          allow write: if false;
+        }
+      }
+
       match /members/{memberId} {
         allow read: if isActiveMember(groupId);
-        allow create, update, delete: if isLeaderOrOwner(groupId);
+        allow create, update: if isLeaderOrOwner(groupId) && validPublicMemberDoc();
+        allow delete: if false;
 
         match /pastoralNotes/{noteId} {
           allow read, create, update, delete: if isLeaderOrOwner(groupId);
+        }
+
+        match /private/profile {
+          allow read: if isLeaderOrOwner(groupId);
+          allow create, update: if isLeaderOrOwner(groupId) && validPrivateProfileDoc();
+          allow delete: if false;
         }
       }
 

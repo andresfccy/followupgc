@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   CalendarCheck,
   CalendarX2,
@@ -27,7 +27,13 @@ import {
   signInWithGoogle,
   signOutCurrentUser,
 } from '@/lib/auth'
-import { parseImportFile } from '@/lib/memberImport'
+import {
+  createExcelImportRun,
+  subscribeExcelImportRun,
+  uploadExcelImportFile,
+  type ExcelImportPreviewRow,
+  type ExcelImportRun,
+} from '@/lib/remoteImports'
 import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { cn } from '@/lib/utils'
@@ -68,8 +74,11 @@ function App() {
   const [selectedMemberId, setSelectedMemberId] = useState(members[0]?.id ?? '')
   const [selectedSessionId, setSelectedSessionId] = useState(sessions[0]?.id ?? '')
   const [importStatus, setImportStatus] = useState(
-    'El contrato de importacion esta preparado. El parser XLSX queda pendiente.',
+    'El Excel oficial se sube a Firebase Storage y se procesa en backend. Esta fase solo genera preview.',
   )
+  const [activeImportRunId, setActiveImportRunId] = useState('')
+  const [activeImportRun, setActiveImportRun] = useState<ExcelImportRun | null>(null)
+  const [activeImportRows, setActiveImportRows] = useState<ExcelImportPreviewRow[]>([])
   const [authStatus, setAuthStatus] = useState('')
 
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0]
@@ -86,6 +95,20 @@ function App() {
     () => [...sessions].sort((a, b) => b.date.localeCompare(a.date)),
     [sessions],
   )
+  const visibleImportRun =
+    activeImportRun?.groupId === authSession.currentGroupId ? activeImportRun : null
+  const visibleImportRows = visibleImportRun ? activeImportRows : []
+
+  useEffect(() => {
+    if (!authSession.currentGroupId || !activeImportRunId) {
+      return undefined
+    }
+
+    return subscribeExcelImportRun(authSession.currentGroupId, activeImportRunId, ({ run, rows }) => {
+      setActiveImportRun(run)
+      setActiveImportRows(rows)
+    })
+  }, [activeImportRunId, authSession.currentGroupId])
 
   function handleAddMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -139,10 +162,31 @@ function App() {
     const file = event.currentTarget.files?.[0]
     if (!file) return
 
+    if (!authSession.user || !authSession.currentMembership) {
+      setImportStatus('Inicia sesion y selecciona un grupo remoto antes de subir el Excel.')
+      event.currentTarget.value = ''
+      return
+    }
+
+    if (!['owner', 'leader'].includes(authSession.currentMembership.role)) {
+      setImportStatus('Solo owner o leader pueden preparar importaciones desde Excel.')
+      event.currentTarget.value = ''
+      return
+    }
+
     try {
-      await parseImportFile(file)
+      setImportStatus('Creando importRun y subiendo archivo a Firebase Storage...')
+      const { importRunId, storagePath } = await createExcelImportRun(
+        authSession.user,
+        authSession.currentMembership.groupId,
+        file,
+      )
+
+      setActiveImportRunId(importRunId)
+      await uploadExcelImportFile(storagePath, file)
+      setImportStatus('Archivo subido. El backend esta generando el preview.')
     } catch (error) {
-      setImportStatus(error instanceof Error ? error.message : 'No se pudo preparar el archivo.')
+      setImportStatus(error instanceof Error ? error.message : 'No se pudo subir el archivo.')
     } finally {
       event.currentTarget.value = ''
     }
@@ -319,7 +363,7 @@ function App() {
 
             <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
               <label className="grid gap-2 text-sm font-medium text-slate-700">
-                Importacion desde archivo de iglesia
+                Preview desde Excel oficial
                 <input
                   accept=".xlsx"
                   className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
@@ -328,6 +372,11 @@ function App() {
                 />
               </label>
               <p className="mt-2 text-sm leading-6 text-slate-600">{importStatus}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                El archivo se procesa de forma segura en backend. Esta fase solo genera preview;
+                todavía no importa miembros definitivamente.
+              </p>
+              <ImportRunPreview run={visibleImportRun} rows={visibleImportRows} />
             </div>
 
             <div className="mt-4 grid gap-2">
@@ -720,6 +769,95 @@ function AuthPanel({
       </div>
     </div>
   )
+}
+
+function ImportRunPreview({
+  run,
+  rows,
+}: {
+  run: ExcelImportRun | null
+  rows: ExcelImportPreviewRow[]
+}) {
+  if (!run) return null
+
+  return (
+    <div className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-slate-950">ImportRun {run.id}</p>
+          <p className="text-xs text-slate-500">{run.fileName ?? run.storagePath}</p>
+        </div>
+        <span className="rounded-full border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700">
+          {importStatusLabel(run.status)}
+        </span>
+      </div>
+
+      {run.status === 'failed' ? (
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+          El backend no pudo generar el preview.
+        </p>
+      ) : null}
+
+      {run.summary ? (
+        <dl className="grid gap-2 sm:grid-cols-4">
+          <ImportMetric label="Filas" value={run.summary.totalRows} />
+          <ImportMetric label="Validas" value={run.summary.validRows} />
+          <ImportMetric label="Crear" value={run.summary.membersToCreate} />
+          <ImportMetric label="Actualizar" value={run.summary.membersToUpdate} />
+        </dl>
+      ) : null}
+
+      {run.errors?.length ? (
+        <div className="grid gap-2">
+          <p className="text-sm font-medium text-slate-950">Errores y advertencias</p>
+          {run.errors.slice(0, 6).map((error, index) => (
+            <p
+              className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900"
+              key={`${error.rowNumber}-${error.field ?? 'file'}-${index}`}
+            >
+              Fila {error.rowNumber || 'archivo'}: {error.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {rows.length ? (
+        <div className="grid gap-2">
+          <p className="text-sm font-medium text-slate-950">Primeras filas del preview</p>
+          {rows.slice(0, 5).map((row) => (
+            <div className="rounded-md border border-slate-200 p-2" key={row.rowNumber}>
+              <p className="text-sm font-medium text-slate-950">{row.fullName}</p>
+              <p className="text-xs text-slate-600">
+                Fila {row.rowNumber} · {row.action === 'update' ? 'Actualizar' : 'Crear'} · Doc{' '}
+                {row.documentIdHash.slice(0, 8)}...
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ImportMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <dt className="text-xs font-medium uppercase text-slate-500">{label}</dt>
+      <dd className="mt-1 text-sm font-semibold text-slate-950">{value}</dd>
+    </div>
+  )
+}
+
+function importStatusLabel(status: ExcelImportRun['status']) {
+  const labels: Record<ExcelImportRun['status'], string> = {
+    uploaded: 'Subido',
+    processing: 'Procesando',
+    preview_ready: 'Preview listo',
+    failed: 'Fallido',
+    cancelled: 'Cancelado',
+  }
+
+  return labels[status]
 }
 
 function Metric({

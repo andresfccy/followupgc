@@ -1,0 +1,32 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function membershipPath(groupId) {
+      return /databases/(default)/documents/groups/$(groupId)/memberships/$(request.auth.uid);
+    }
+
+    function isLeaderOrOwner(groupId) {
+      return isSignedIn() &&
+        firestore.exists(membershipPath(groupId)) &&
+        firestore.get(membershipPath(groupId)).data.status == 'active' &&
+        firestore.get(membershipPath(groupId)).data.role in ['owner', 'leader'];
+    }
+
+    match /imports/{groupId}/{importRunId}/source.xlsx {
+      allow read: if isLeaderOrOwner(groupId);
+      allow create: if resource == null &&
+        isLeaderOrOwner(groupId) &&
+        request.resource.size < 20 * 1024 * 1024 &&
+        request.resource.contentType in [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/octet-stream'
+        ];
+      allow update, delete: if false;
+    }
+  }
+}

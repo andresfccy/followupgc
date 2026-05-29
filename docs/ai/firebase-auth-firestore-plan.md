@@ -4,8 +4,8 @@
 
 This document designs Firebase Phase 2 for FollowUpGC before implementation.
 It defines the recommended authentication model, Firestore data model,
-multi-group access model, role boundaries, localStorage migration strategy,
-Zustand coexistence, and privacy limits.
+multi-group access model, role boundaries, optional localStorage migration
+considerations, Zustand coexistence, and privacy limits.
 
 Phase 2 is a design phase only. It must not add Firebase SDK, Auth,
 Firestore, Storage, Cloud Functions, XLSX parsing, remote sync, or changes
@@ -344,7 +344,43 @@ Conceptual authorization:
 Before real production use, write and test rules with the Firebase Emulator
 Suite and explicit allow/deny test cases for every role.
 
+## Official Excel To Firestore Initial Import
+
+Updated product decision: the first real production data load should come from
+the official church Excel file, not from localStorage.
+
+Required flow:
+
+```txt
+Excel oficial de la iglesia
+-> parser/normalizacion
+-> preview obligatorio
+-> confirmacion explicita
+-> escritura controlada en Firestore
+```
+
+Do not use seeds, demo data, local development data, or localStorage test data
+as the first production source.
+
+Before writing imported members:
+
+- Require a remote destination group.
+- Authorize with active group membership, not `defaultGroupId` alone.
+- Allow import only for `owner` and `leader`.
+- Deny import to `viewer`, inactive members, and unaffiliated users.
+- Define remote member and private profile paths.
+- Add Firestore Rules and rules tests for those paths.
+- Keep `pnpm test:rules` passing.
+- Require preview and explicit confirmation.
+- Do not upload or store the original Excel file.
+
 ## LocalStorage To Firestore Migration
+
+Status: deferred / optional.
+
+This is no longer the immediate next production path. Revisit only if users
+have real localStorage data that must be preserved. Do not migrate seeds, demo
+data, local development data, or local test data.
 
 ### Keep Local Mode
 
@@ -354,7 +390,8 @@ sync.
 
 ### Migration Trigger
 
-Migration should be manual and explicit:
+If this optional path is resumed later, migration should be manual and
+explicit:
 
 - Never upload local data automatically after sign-in.
 - Explain that member, attendance, document, and pastoral data will be copied
@@ -364,14 +401,14 @@ Migration should be manual and explicit:
 
 ### Destination Group
 
-The user should select:
+If localStorage migration is needed later, the user should select:
 
 - Create a new remote group from local data.
 - Merge local data into an existing remote group where they are `owner` or
   `leader`.
 
-For the first migration version, prefer "create new remote group" because it
-reduces accidental merges and duplicate handling.
+For any future localStorage migration version, prefer "create new remote group"
+because it reduces accidental merges and duplicate handling.
 
 ### Existing Remote Data
 
@@ -512,10 +549,15 @@ Recommended sequence after this design phase:
 3. Add group creation and first-owner membership.
 4. Add group selector and default group behavior.
 5. Add Firestore rules and emulator tests.
-6. Add remote read/write repositories.
-7. Connect Zustand to remote group data.
-8. Design and implement manual localStorage migration preview.
-9. Decide XLSX parser strategy separately.
+6. Design official Excel -> Firestore initial import.
+7. Implement local XLSX parser to `ImportPreview` without Firestore writes.
+8. Add member/private profile rules and tests.
+9. Add confirmed imported-member writes to Firestore.
+10. Read remote members from Firestore.
+11. Add remote member create/edit, then meetings, attendance, and pastoral
+    notes.
+12. Consider localStorage -> Firestore migration only if real local data must
+    be preserved.
 
 ## Open Decisions
 
@@ -529,6 +571,6 @@ Recommended sequence after this design phase:
 - Whether owner invitations are manual first, or require invite documents and
   email delivery.
 - Whether local notes stored on members become pastoral-note documents during
-  the first migration.
+  a future optional localStorage migration.
 - Whether XLSX parsing should be browser-local, Storage + Cloud Functions, or
   both behind the existing import contract.

@@ -5,9 +5,16 @@ the current app is local-only.
 
 ## Current Data Boundary
 
-- Data is stored in the user's browser `localStorage`.
-- There is no backend, account system, cloud sync, telemetry, or analytics.
-- No data should leave the device.
+- Pastoral app data still primarily lives in the user's browser
+  `localStorage`.
+- Firebase Auth identifies users.
+- Firestore stores minimal user profiles, remote groups, memberships,
+  `defaultGroupId`, importRun preview metadata, and the prepared remote member
+  security model.
+- Firebase Storage stores official XLSX uploads for backend processing in the
+  current import phase.
+- Cloud Functions processes XLSX files to generate preview data.
+- Analytics and remote logging of sensitive content remain out of scope.
 
 ## Rules
 
@@ -20,7 +27,19 @@ the current app is local-only.
 - Do not store the original imported file in app state or localStorage.
 - Do not show full document ids in dense list views unless there is a specific
   user need.
-- Do not upload member import files to a server in the local-only phase.
+- Official XLSX uploads are allowed only for the backend-processing import
+  phase and must go through Storage rules, group membership checks, and preview.
+- Do not parse XLSX in the browser.
+- Do not write final member records until member/private profile rules and
+  tests exist.
+- Store full `documentId` only in member private profile if it is needed; never
+  in the public member doc or previewRows.
+- Treat `documentIdHash` as technical metadata for deduplication. Do not show it
+  in UI.
+- Define Storage retention/deletion for uploaded source files before broad
+  production use.
+- Keep `pnpm test:rules` and `pnpm test:storage-rules` passing before any
+  confirmed member import writes.
 
 ## Future Remote Features
 

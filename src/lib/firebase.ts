@@ -1,11 +1,13 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
+import { getStorage, type FirebaseStorage } from 'firebase/storage'
 
 type FirebaseRuntime = {
   app: FirebaseApp | null
   auth: Auth | null
   db: Firestore | null
+  storage: FirebaseStorage | null
   isConfigured: boolean
 }
 
@@ -28,6 +30,7 @@ function createFirebaseRuntime(): FirebaseRuntime {
       app: null,
       auth: null,
       db: null,
+      storage: null,
       isConfigured: false,
     }
   }
@@ -38,6 +41,7 @@ function createFirebaseRuntime(): FirebaseRuntime {
     app,
     auth: getAuth(app),
     db: getFirestore(app),
+    storage: getStorage(app),
     isConfigured: true,
   }
 }

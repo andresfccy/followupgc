@@ -8,12 +8,17 @@ FollowUpGC is deployed as a static Firebase Hosting SPA at:
 https://followupgc.web.app
 ```
 
-The production app remains local-first. Runtime group data is stored in the
-browser through Zustand persist and `localStorage`. Firebase Auth is implemented
-for Google Sign-In and email/password. Firestore now stores minimal remote group
-identity, group memberships, user group lookup records, and `defaultGroupId`.
-Pastoral group data, Storage, Cloud Functions, cloud sync, and real XLSX
-parsing are not implemented yet.
+The production app remains local-first for pastoral data until remote import is
+implemented. Runtime local/demo data is stored in the browser through Zustand
+persist and `localStorage`. Firebase Auth is implemented for Google Sign-In and
+email/password. Firestore now stores minimal remote group identity, group
+memberships, user group lookup records, and `defaultGroupId`.
+
+Product decision: localStorage is not the source of production data now. The
+first real production data load should come from the official church Excel file
+through parsing, normalization, mandatory preview, explicit confirmation, and
+controlled Firestore writes. Seeds, local development data, demo data, and
+localStorage test data must not be migrated as production data.
 
 ## Completed Phases
 
@@ -106,24 +111,174 @@ Not completed in this phase:
 - Final viewer data projection decision.
 - Local data migration or remote sync.
 
+### Phase 4.5 - Firestore Rules Tests
+
+Status: Completed
+
+Tasks:
+
+- Added Firebase Emulator configuration for Firestore.
+- Added `@firebase/rules-unit-testing`.
+- Added `pnpm test:rules`.
+- Added Node-based rules tests in `tests/firestore.rules.test.mjs`.
+- Covered signed-out denial, profile ownership, `defaultGroupId` validation,
+  group creation, initial owner membership, group reads by role, inactive
+  denial, fake membership mirrors, mirror role/status matching, and critical
+  write boundaries.
+- Tightened the initial self-owner membership rule so it only applies while the
+  group is created in the same request/batch.
+- Documented setup and limitations in `docs/ai/firestore-rules-testing.md`.
+
+Validation:
+
+- `pnpm test:rules` passed locally with Java 21+.
+- Tests executed: 17.
+- Tests approved: 17.
+- Tests failed: 0.
+- Exit code: 0.
+- Firestore Emulator started and shut down correctly.
+
+Migration gate:
+
+- Phase 5 must not start uploading sensitive imported data if `pnpm test:rules`
+  fails.
+- Rules must be re-tested each time new remote collections or permissions are
+  added.
+
+Phase 5C expanded the current rules gate:
+
+- `pnpm test:rules`: 27 executed, 27 passed, 0 failed.
+- `pnpm test:storage-rules`: 4 executed, 4 passed, 0 failed.
+- Java: OpenJDK 21.0.11.
+- Final member writes must not start if either rules test command fails.
+
 ## Current Phase
 
-### Phase 5 - LocalStorage To Firestore Migration
+### Phase 5A - Excel To Firestore Initial Import Design
+
+Status: Completed
+
+Tasks:
+
+- Define the official Excel file as the first production data source.
+- Define the import flow:
+  Excel oficial de la iglesia -> parser/normalizacion -> preview obligatorio
+  -> confirmacion explicita -> escritura controlada en Firestore.
+- Require a remote destination group before import.
+- Restrict import to `owner` and `leader`; `viewer` cannot import.
+- Decide that XLSX processing happens in Firebase Storage + Cloud Functions,
+  not in the browser.
+- Define remote member and private profile shape before writing.
+- Define duplicate and conflict handling around `documentId`.
+- Require Firestore rules and rules tests for member/private profile writes
+  before any real member data is written.
+- Keep localStorage as local/demo/fallback, not as the production source.
+
+### Phase 5B - Storage + Cloud Functions XLSX Processing To ImportPreview
+
+Status: Completed
+
+Tasks:
+
+- Add Firebase Functions backend for XLSX processing.
+- Add Firebase Storage upload path:
+  `imports/{groupId}/{importRunId}/source.xlsx`.
+- Add `groups/{groupId}/importRuns/{importRunId}`.
+- Frontend creates importRun, uploads file, listens to status/preview, and does
+  not parse XLSX.
+- Cloud Function parses the official church Excel columns:
+  `Nombre`, `Apellidos`, `Documento`, `Genero` / `Género`, `Cumpleaños`,
+  `En Grupo Desde`, `Rol en Grupo`, `Asistencias Semestre`, `Servidor`, and
+  `Esta Sirviendo`.
+- Generate preview summary, errors, and previewRows.
+- Do not write final members.
+- Document Storage lifecycle/deletion as pending.
+
+### Phase 5C - Firestore Rules And Tests For ImportRuns, Members And Private Profiles
+
+Status: Completed
+
+Tasks:
+
+- Added Firestore rules for `groups/{groupId}/members/{memberId}` public docs.
+- Added Firestore rules for
+  `groups/{groupId}/members/{memberId}/private/profile`.
+- Kept full `documentId` out of public member docs and previewRows.
+- Allowed active `viewer` memberships to read public member docs only because
+  the public doc excludes full document ids and private fields.
+- Restricted private profiles and previewRows to active `owner` and `leader`.
+- Kept client writes to previewRows denied; Cloud Functions/Admin SDK owns
+  preview generation.
+- Added Storage Rules tests for XLSX upload/read boundaries.
+- Added `docs/ai/firestore-members-security-model.md`.
+- Require `pnpm test:rules` and `pnpm test:storage-rules` to pass before final
+  member writes are enabled.
+
+### Phase 5D - Confirmed Backend Write Of Imported Members To Firestore
+
+Status: Next / Planned
+
+Tasks:
+
+- Write imported members only after preview and explicit confirmation.
+- Require a destination remote group.
+- Allow only `owner` or `leader` imports.
+- Upsert by `documentId` within the destination group.
+- Store import metadata and define source file deletion/retention.
+
+### Phase 5E - Read Remote Members From Firestore
 
 Status: Planned
 
 Tasks:
 
-- Build a migration preview from current `followupgc-data`.
-- Require explicit confirmation before upload.
-- Let the user create a new remote group or choose an existing group where they
-  are owner/leader.
-- Preserve members, imported fields, meetings, cancelled meetings, attendance,
-  and pastoral notes.
-- Use `documentId` for imported-member upserts.
-- Avoid aggressive full-name deduplication in v1.
-- Show conflicts before merge when remote data already exists.
-- Keep local-only data unless the user chooses to clear it.
+- Read remote members for the selected remote group.
+- Preserve local/demo/fallback mode.
+- Avoid mixing local test data with remote production data.
+
+### Phase 5F - Remote Member Create/Edit
+
+Status: Planned
+
+Tasks:
+
+- Add controlled remote member create/edit flows.
+- Respect role permissions.
+- Keep sensitive fields out of logs and dense UI.
+
+### Phase 5G - Remote Meetings And Attendance
+
+Status: Planned
+
+Tasks:
+
+- Add remote meetings and attendance after remote member import is stable.
+- Extend rules and tests before writes.
+
+### Phase 5H - Remote Pastoral Notes
+
+Status: Planned
+
+Tasks:
+
+- Add remote pastoral notes after member, meeting, and attendance security is
+  settled.
+- Restrict pastoral notes to `owner` and `leader`.
+- Extend rules and tests before writes.
+
+### Optional Future - LocalStorage To Firestore Migration
+
+Status: Deferred / Optional
+
+Tasks:
+
+- Revisit only if users have real localStorage data that must be preserved.
+- Do not use this for the first real production data load.
+- Do not migrate seeds, demo data, local development data, or local test data.
+- Never migrate automatically.
+- Do not delete localStorage automatically.
+- If needed later, build a preview and require explicit confirmation before
+  upload.
 
 ### Phase 6 - Remote Sync With Zustand
 
@@ -139,18 +294,18 @@ Tasks:
 - Avoid direct Firestore calls in UI components.
 - Keep local-only mode functional.
 
-### Phase 7 - XLSX Import Processing
+### Phase 7 - Extended XLSX Import Processing
 
 Status: Planned
 
 Tasks:
 
-- Decide parser strategy: browser-local parser, Firebase Storage + Cloud
-  Functions, or both behind the existing import contract.
-- If using Storage + Functions, design short-lived file retention and strict
-  Storage rules first.
-- Generate `ImportPreview` from real `.xlsx` files.
-- Confirm import before writing.
+- Continue extending the backend import pipeline after confirmed member writes
+  are stable.
+- Keep XLSX parsing in Firebase Storage + Cloud Functions, not the browser.
+- Define short-lived file retention or deletion after preview/import.
+- Add richer conflict review if the first confirmed import exposes real-world
+  duplicate patterns.
 - Upsert imported members by `documentId`.
 - Preserve pastoral and operational local data on reimport.
 
@@ -160,6 +315,8 @@ Tasks:
 
 - Design signed-in first-run flow.
 - Design local-only versus cloud-enabled mode selection.
+- Design official Excel initial import UX with destination group, preview, and
+  confirmation.
 - Refine the basic group selector for users with multiple groups.
 - Refine default group settings after owner-managed assignments exist.
 - Design role management UI for owners.
@@ -168,27 +325,32 @@ Tasks:
 
 ### Data And Architecture
 
-- Extend Firestore collection structure for real remote group data after
-  migration scope is approved.
+- Extend Firestore collection structure for official Excel-imported members and
+  private profiles before writes are enabled.
 - Keep `users/{userId}/groupMemberships/{groupId}` as the v1 user lookup.
 - Keep Firebase reads/writes behind repository-style functions.
-- Define remote error handling and retry behavior.
-- Define migration conflict format.
+- Define remote import error handling and retry behavior.
+- Define Excel import conflict format.
 - Decide if local member `notes` becomes pastoral notes subcollection records.
 
 ### Security And Privacy
 
-- Add emulator tests for the initial Firestore rules.
-- Add emulator tests for document id and pastoral note access.
-- Decide viewer access to `documentId`.
+- Keep `pnpm test:rules` passing before any sensitive Firestore import,
+  migration, or new remote collection write.
+- Keep `pnpm test:storage-rules` passing before XLSX uploads are relied on.
+- Add emulator tests for pastoral note access before pastoral notes move
+  remote.
+- Do not place full `documentId` in public member docs.
+- Design last-owner protection.
+- Keep membership mirrors synchronized with authoritative memberships.
 - Decide whether remote offline persistence is enabled.
 - Confirm no analytics, tracking, or remote logging of sensitive data.
 
 ### Import
 
-- Decide XLSX parser strategy.
+- Keep XLSX parsing in Firebase Cloud Functions, not the browser.
 - Keep original XLSX files out of app state and localStorage.
-- If using Firebase Storage later, define retention and deletion behavior.
+- Define Storage retention/deletion behavior for uploaded source files.
 - Ensure import previews do not expose full document ids unnecessarily.
 
 ## Open Decisions
@@ -197,35 +359,44 @@ Tasks:
 - Whether single-group users without `defaultGroupId` should be prompted more
   prominently to save a default.
 - Whether viewers can read full member records or need sanitized projections.
+- Whether viewers should continue reading `documentIdHash` in public member
+  docs, or whether the hash should move to a stricter private/lookup path.
 - Whether Firestore offline persistence is acceptable for sensitive remote
   data.
 - Whether invitations are owner-managed manually or implemented with pending
   invite documents.
-- Whether Cloud Functions are acceptable for future XLSX parsing.
-- Whether local data migration should prefer creating a new remote group over
-  merging into existing groups.
+- Whether the Storage source file should be deleted immediately after preview
+  generation or retained for a short audit window.
+- Whether a future localStorage migration is ever needed for users with real
+  local data to preserve.
+- Exact lifecycle for uploaded XLSX source files after preview or confirmed
+  import.
 
 ## Risks
 
 - Firestore rules cannot hide individual fields from readable documents, so
-  viewer access to member data containing `documentId` needs careful design.
-- Uploading local data to Firestore changes the privacy boundary and must never
-  happen without explicit confirmation.
+  viewer-readable member docs must never include full `documentId`.
+- Uploading official Excel data to Firestore changes the privacy boundary and
+  must never happen without preview, destination group, role check, passing
+  rules tests, and explicit confirmation.
 - Multi-leader groups increase exposure of pastoral notes.
 - Denormalized membership lookup records can become stale if writes are not
   coordinated.
 - Remote offline persistence may cache sensitive data on shared devices.
-- Merging local and remote data can create duplicate members or conflicting
-  attendance if preview/conflict handling is weak.
+- Importing Excel data can create duplicate members or conflicts if
+  `documentId` matching, preview, and conflict handling are weak.
 
 ## Definition Of Done For Current Phase
 
-Phase 5 is done only when:
+Phase 5C is done only when:
 
-- A migration preview reads current `followupgc-data` without uploading it.
-- The user explicitly chooses a destination remote group or creates a new one.
-- The user confirms before any member, meeting, attendance, note, import, or
-  document-id data is written to Firestore.
-- The preview reports counts and likely conflicts before writing.
-- Migration writes are limited to groups where the user is `owner` or `leader`.
-- Local-only data remains available after migration.
+- No final member records are written.
+- Firestore Rules protect importRuns, previewRows, public members, and private
+  profiles.
+- Storage Rules protect XLSX uploads and reads.
+- Firestore Rules tests cover owner, leader, viewer, inactive, signed-out, and
+  unaffiliated access.
+- Storage Rules tests cover owner/leader upload/read, denied roles, content
+  type, overwrite, and delete boundaries.
+- Documentation explains the member/private profile model, privacy, and
+  remaining risks.

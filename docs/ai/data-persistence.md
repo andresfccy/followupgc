@@ -48,3 +48,13 @@ the church system. It preserves local FollowUpGC fields such as `id`, `status`,
 If remote persistence is requested later, keep local-first behavior available.
 Move persistence behind repository-style functions instead of spreading API
 calls through UI components.
+
+Current production import decision:
+
+- localStorage is not the source for the first real production dataset.
+- localStorage remains valid as local/demo/fallback mode.
+- Do not automatically migrate localStorage to Firestore.
+- Do not migrate seeds, demo data, local development data, or local test data.
+- The first real production load should come from the official church Excel
+  file through parser/normalization, mandatory preview, explicit confirmation,
+  and controlled Firestore writes.
