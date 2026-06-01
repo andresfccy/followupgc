@@ -45,7 +45,7 @@ const maxPreviewRowsPerDocument = 400
 
 export const processChurchXlsxImport = onObjectFinalized(
   {
-    region: 'us-central1',
+    region: 'us-east1',
     memory: '512MiB',
     timeoutSeconds: 120,
   },
