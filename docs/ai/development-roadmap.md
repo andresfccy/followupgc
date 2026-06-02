@@ -216,19 +216,31 @@ Tasks:
 
 ### Phase 5D - Confirmed Backend Write Of Imported Members To Firestore
 
-Status: Next / Planned
+Status: Implemented
 
 Tasks:
 
-- Write imported members only after preview and explicit confirmation.
-- Require a destination remote group.
-- Allow only `owner` or `leader` imports.
-- Upsert by `documentId` within the destination group.
-- Store import metadata and define source file deletion/retention.
+- Added backend confirmation through `confirmChurchXlsxImport`.
+- Writes imported members only after backend-generated preview and explicit
+  confirmation.
+- Requires a destination remote group and active `owner` or `leader`
+  membership.
+- Revalidates the source XLSX in Cloud Functions instead of parsing in the
+  browser.
+- Upserts by `documentIdHash` within the destination group while storing the
+  full `documentId` only in `members/{memberId}/private/profile`.
+- Stores import metadata on the public member doc and confirmation result on
+  the importRun.
+- Added a review popup with the full create/update table before approval.
+
+Remaining:
+
+- Add dedicated Cloud Function tests for create/update confirmation behavior.
+- Define source XLSX deletion/retention.
 
 ### Phase 5E - Read Remote Members From Firestore
 
-Status: Planned
+Status: Next / Planned
 
 Tasks:
 

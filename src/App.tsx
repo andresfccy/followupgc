@@ -5,12 +5,14 @@ import {
   Check,
   Circle,
   Clock3,
+  FileSearch,
   LogIn,
   LogOut,
   MessageSquareText,
   Plus,
   Settings,
   Users,
+  X,
 } from 'lucide-react'
 import type {
   AttendanceStatus,
@@ -28,6 +30,7 @@ import {
   signOutCurrentUser,
 } from '@/lib/auth'
 import {
+  confirmExcelImportRun,
   createExcelImportRun,
   subscribeExcelImportRun,
   uploadExcelImportFile,
@@ -79,6 +82,8 @@ function App() {
   const [activeImportRunId, setActiveImportRunId] = useState('')
   const [activeImportRun, setActiveImportRun] = useState<ExcelImportRun | null>(null)
   const [activeImportRows, setActiveImportRows] = useState<ExcelImportPreviewRow[]>([])
+  const [isImportReviewOpen, setIsImportReviewOpen] = useState(false)
+  const [isConfirmingImport, setIsConfirmingImport] = useState(false)
   const [authStatus, setAuthStatus] = useState('')
 
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0]
@@ -183,12 +188,33 @@ function App() {
       )
 
       setActiveImportRunId(importRunId)
+      setIsImportReviewOpen(false)
       await uploadExcelImportFile(storagePath, file)
       setImportStatus('Archivo subido. El backend esta generando el preview.')
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : 'No se pudo subir el archivo.')
     } finally {
       event.currentTarget.value = ''
+    }
+  }
+
+  async function handleConfirmImport() {
+    if (!visibleImportRun || !authSession.currentGroupId) return
+
+    try {
+      setIsConfirmingImport(true)
+      setImportStatus('Confirmando importacion y escribiendo miembros en Firestore...')
+      const result = await confirmExcelImportRun(authSession.currentGroupId, visibleImportRun.id)
+      setImportStatus(
+        `Importacion confirmada. Creados: ${result.created}. Actualizados: ${result.updated}.`,
+      )
+      setIsImportReviewOpen(false)
+    } catch (error) {
+      setImportStatus(
+        error instanceof Error ? error.message : 'No se pudo confirmar la importacion.',
+      )
+    } finally {
+      setIsConfirmingImport(false)
     }
   }
 
@@ -373,10 +399,15 @@ function App() {
               </label>
               <p className="mt-2 text-sm leading-6 text-slate-600">{importStatus}</p>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                El archivo se procesa de forma segura en backend. Esta fase solo genera preview;
-                todavía no importa miembros definitivamente.
+                El archivo se procesa de forma segura en backend. Revisa el preview y confirma
+                antes de escribir miembros definitivos.
               </p>
-              <ImportRunPreview run={visibleImportRun} rows={visibleImportRows} />
+              <ImportRunPreview
+                isConfirming={isConfirmingImport}
+                onOpenReview={() => setIsImportReviewOpen(true)}
+                run={visibleImportRun}
+                rows={visibleImportRows}
+              />
             </div>
 
             <div className="mt-4 grid gap-2">
@@ -547,6 +578,15 @@ function App() {
           </Panel>
         </aside>
       </div>
+      {isImportReviewOpen && visibleImportRun ? (
+        <ImportReviewDialog
+          isConfirming={isConfirmingImport}
+          onClose={() => setIsImportReviewOpen(false)}
+          onConfirm={handleConfirmImport}
+          rows={visibleImportRows}
+          run={visibleImportRun}
+        />
+      ) : null}
     </main>
   )
 }
@@ -772,13 +812,19 @@ function AuthPanel({
 }
 
 function ImportRunPreview({
+  isConfirming,
+  onOpenReview,
   run,
   rows,
 }: {
+  isConfirming: boolean
+  onOpenReview: () => void
   run: ExcelImportRun | null
   rows: ExcelImportPreviewRow[]
 }) {
   if (!run) return null
+  const canReview = run.status === 'preview_ready' && Boolean(run.summary) && rows.length > 0
+  const hasErrors = Boolean(run.summary?.errors)
 
   return (
     <div className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3">
@@ -795,6 +841,13 @@ function ImportRunPreview({
       {run.status === 'failed' ? (
         <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
           El backend no pudo generar el preview.
+        </p>
+      ) : null}
+
+      {run.status === 'imported' && run.result ? (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          Importacion completada. Creados: {run.result.created}. Actualizados:{' '}
+          {run.result.updated}.
         </p>
       ) : null}
 
@@ -828,13 +881,149 @@ function ImportRunPreview({
             <div className="rounded-md border border-slate-200 p-2" key={row.rowNumber}>
               <p className="text-sm font-medium text-slate-950">{row.fullName}</p>
               <p className="text-xs text-slate-600">
-                Fila {row.rowNumber} · {row.action === 'update' ? 'Actualizar' : 'Crear'} · Doc{' '}
-                {row.documentIdHash.slice(0, 8)}...
+                Fila {row.rowNumber} · {row.action === 'update' ? 'Actualizar' : 'Crear'}
               </p>
             </div>
           ))}
         </div>
       ) : null}
+
+      {canReview ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            disabled={isConfirming || hasErrors}
+            onClick={onOpenReview}
+            type="button"
+          >
+            <FileSearch size={16} /> Revisar y confirmar
+          </button>
+          {hasErrors ? (
+            <p className="text-sm text-amber-800">
+              Hay errores en el preview. Corrigelos antes de importar.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ImportReviewDialog({
+  isConfirming,
+  onClose,
+  onConfirm,
+  rows,
+  run,
+}: {
+  isConfirming: boolean
+  onClose: () => void
+  onConfirm: () => void
+  rows: ExcelImportPreviewRow[]
+  run: ExcelImportRun
+}) {
+  const createCount = rows.filter((row) => row.action === 'create').length
+  const updateCount = rows.filter((row) => row.action === 'update').length
+
+  return (
+    <div
+      aria-labelledby="import-review-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 px-4 py-6"
+      role="dialog"
+    >
+      <div className="grid max-h-full w-full max-w-5xl grid-rows-[auto_1fr_auto] rounded-md bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-4">
+          <div>
+            <p className="text-xs font-medium uppercase text-emerald-700">Confirmar importacion</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950" id="import-review-title">
+              {run.fileName ?? 'Excel oficial'}
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Esta tabla es la lista que se escribira en Firestore. Los documentos completos se
+              guardan solo en el perfil privado de cada persona.
+            </p>
+          </div>
+          <button
+            aria-label="Cerrar revision"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:border-slate-500"
+            disabled={isConfirming}
+            onClick={onClose}
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="min-h-0 overflow-auto p-4">
+          <dl className="mb-4 grid gap-2 sm:grid-cols-3">
+            <ImportMetric label="Crear" value={createCount} />
+            <ImportMetric label="Actualizar" value={updateCount} />
+            <ImportMetric label="Filas" value={rows.length} />
+          </dl>
+          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
+              <tr>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Accion</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Persona</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Genero</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Cumpleanos</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Desde</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Rol</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Servidor</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-medium">Sirviendo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr className="border-b border-slate-100" key={row.rowNumber}>
+                  <td className="px-3 py-2">
+                    <span
+                      className={cn(
+                        'inline-flex rounded-full border px-2 py-1 text-xs font-medium',
+                        row.action === 'update'
+                          ? 'border-sky-200 bg-sky-50 text-sky-900'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-900',
+                      )}
+                    >
+                      {row.action === 'update' ? 'Actualizar' : 'Crear'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p className="font-medium text-slate-950">{row.fullName}</p>
+                    <p className="text-xs text-slate-500">Fila {row.rowNumber}</p>
+                  </td>
+                  <td className="px-3 py-2 text-slate-700">{row.gender ?? '-'}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.birthday ?? '-'}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.joinedAt ?? '-'}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.groupRole ?? '-'}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.isServer ? 'Si' : 'No'}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.isServing ? 'Si' : 'No'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 p-4">
+          <button
+            className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={isConfirming}
+            onClick={onClose}
+            type="button"
+          >
+            Volver
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            disabled={isConfirming || rows.length === 0}
+            onClick={onConfirm}
+            type="button"
+          >
+            <Check size={16} /> {isConfirming ? 'Importando...' : 'Aprobar importacion'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -853,6 +1042,8 @@ function importStatusLabel(status: ExcelImportRun['status']) {
     uploaded: 'Subido',
     processing: 'Procesando',
     preview_ready: 'Preview listo',
+    importing: 'Importando',
+    imported: 'Importado',
     failed: 'Fallido',
     cancelled: 'Cancelado',
   }

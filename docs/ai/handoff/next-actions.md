@@ -22,10 +22,12 @@
   import preview.
 - Phase 5C now defines the remote member/private profile security model and
   adds Firestore Rules plus Storage Rules tests.
-- Next recommended phase: Phase 5D - confirmed backend write from ImportPreview
-  to Firestore members after explicit confirmation.
-- Do not implement confirmed member writes unless `pnpm test:rules` and
-  `pnpm test:storage-rules` are passing.
+- Phase 5D now adds confirmed backend writes from ImportPreview to Firestore
+  members after explicit confirmation.
+- Next recommended phase: Phase 5E - read remote members from Firestore for
+  the selected remote group while preserving local/demo mode.
+- Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
+  `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
 - Firebase Hosting Phase 1 is complete at `https://followupgc.web.app`.
   Redeploy with `pnpm build` and `firebase deploy --only hosting`. Use
@@ -63,9 +65,10 @@
   memberships.
 - Add owner-managed leader/viewer assignment before inviting or assigning more
   users to a group.
-- Before writing imported members to Firestore, use the Phase 5C
-  member/private profile model, require backend-generated preview, and require
-  explicit confirmation.
+- Imported member writes must continue using the Phase 5C member/private
+  profile model, backend-generated preview, and explicit confirmation.
+- Add dedicated Cloud Function tests for `confirmChurchXlsxImport`
+  create/update behavior before broad production use.
 - localStorage -> Firestore migration is deferred/optional. Revisit only if
   users have real local data to preserve. Do not migrate seeds, demo data,
   local development data, or local test data.

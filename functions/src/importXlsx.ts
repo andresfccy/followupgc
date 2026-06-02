@@ -3,12 +3,20 @@ import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 import { logger } from 'firebase-functions'
+import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { onObjectFinalized } from 'firebase-functions/v2/storage'
 import * as XLSX from 'xlsx'
 
 initializeApp()
 
-type ImportStatus = 'uploaded' | 'processing' | 'preview_ready' | 'failed' | 'cancelled'
+type ImportStatus =
+  | 'uploaded'
+  | 'processing'
+  | 'preview_ready'
+  | 'importing'
+  | 'imported'
+  | 'failed'
+  | 'cancelled'
 type ImportSeverity = 'error' | 'warning'
 type Gender = 'F' | 'M'
 
@@ -40,8 +48,14 @@ type NormalizedRow = Omit<PreviewRow, 'action' | 'documentIdHash'> & {
   documentId: string
 }
 
+type ParsedImportRows = {
+  totalRows: number
+  normalizedRows: NormalizedRow[]
+  errors: ImportValidationError[]
+}
+
 const expectedColumns = ['Nombre', 'Apellidos', 'Documento'] as const
-const maxPreviewRowsPerDocument = 400
+const maxBatchOperations = 450
 
 export const processChurchXlsxImport = onObjectFinalized(
   {
@@ -73,49 +87,7 @@ export const processChurchXlsxImport = onObjectFinalized(
 
     try {
       const [buffer] = await getStorage().bucket(event.data.bucket).file(objectName).download()
-      const workbook = XLSX.read(buffer, { cellDates: true, type: 'buffer' })
-      const firstSheetName = workbook.SheetNames[0]
-
-      if (!firstSheetName) {
-        throw new Error('El archivo XLSX no tiene hojas.')
-      }
-
-      const sheet = workbook.Sheets[firstSheetName]
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: '',
-        raw: false,
-      })
-
-      validateRequiredColumns(rows)
-
-      const errors: ImportValidationError[] = []
-      const normalizedRows: NormalizedRow[] = []
-      const seenDocumentIds = new Map<string, number>()
-
-      rows.forEach((row, index) => {
-        const rowNumber = index + 2
-        const result = normalizeRow(row, rowNumber)
-
-        if ('errors' in result) {
-          errors.push(...result.errors)
-          return
-        }
-
-        const previousRow = seenDocumentIds.get(result.row.documentId)
-        if (previousRow) {
-          errors.push({
-            rowNumber,
-            field: 'Documento',
-            message: `Documento duplicado en el archivo. Ya aparece en la fila ${previousRow}.`,
-            severity: 'error',
-          })
-          return
-        }
-
-        seenDocumentIds.set(result.row.documentId, rowNumber)
-        normalizedRows.push(result.row)
-        errors.push(...result.warnings)
-      })
+      const { totalRows, normalizedRows, errors } = parseImportRows(buffer)
 
       const existingDocumentHashes = await findExistingDocumentHashes(groupId, normalizedRows)
       const previewRows: PreviewRow[] = normalizedRows.map(({ documentId, ...row }) => {
@@ -139,12 +111,12 @@ export const processChurchXlsxImport = onObjectFinalized(
           completedAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
           summary: {
-            totalRows: rows.length,
+            totalRows,
             validRows: normalizedRows.length,
-            invalidRows: rows.length - normalizedRows.length,
+            invalidRows: totalRows - normalizedRows.length,
             membersToCreate,
             membersToUpdate,
-            skipped: rows.length - normalizedRows.length,
+            skipped: totalRows - normalizedRows.length,
             warnings: warningCount,
             errors: errorCount,
           },
@@ -174,6 +146,147 @@ export const processChurchXlsxImport = onObjectFinalized(
     }
   },
 )
+
+export const confirmChurchXlsxImport = onCall(
+  {
+    region: 'us-east1',
+    memory: '512MiB',
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    const uid = request.auth?.uid
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Inicia sesion antes de confirmar la importacion.')
+    }
+
+    const groupId = stringFromCallable(request.data?.groupId)
+    const importRunId = stringFromCallable(request.data?.importRunId)
+
+    if (!groupId || !importRunId) {
+      throw new HttpsError('invalid-argument', 'Falta el grupo o el importRun.')
+    }
+
+    const db = getFirestore()
+    const importRunRef = db.doc(`groups/${groupId}/importRuns/${importRunId}`)
+
+    await assertCanConfirmImport(db, groupId, uid)
+
+    let importStarted = false
+
+    try {
+      const importRun = await markImportRunImporting(importRunRef, uid)
+      importStarted = true
+      const storagePath = stringFromCallable(importRun.storagePath)
+
+      if (!storagePath) {
+        throw new HttpsError('failed-precondition', 'El importRun no tiene archivo fuente.')
+      }
+
+      const [buffer] = await getStorage().bucket().file(storagePath).download()
+      const parsedRows = parseImportRows(buffer)
+      const blockingErrors = parsedRows.errors.filter((error) => error.severity === 'error')
+
+      if (blockingErrors.length) {
+        throw new HttpsError(
+          'failed-precondition',
+          'El archivo fuente ya no coincide con un preview valido.',
+        )
+      }
+
+      const previewRows = await readPreviewRows(importRunRef)
+      assertPreviewMatchesParsedRows(previewRows, parsedRows.normalizedRows)
+
+      const existingMembers = await findExistingMemberRefsByHash(groupId, previewRows)
+      const result = await writeImportedMembers({
+        db,
+        groupId,
+        importRunId,
+        rows: parsedRows.normalizedRows,
+        previewRows,
+        existingMembers,
+      })
+
+      await importRunRef.set(
+        {
+          status: 'imported' satisfies ImportStatus,
+          importedAt: FieldValue.serverTimestamp(),
+          completedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          result,
+        },
+        { merge: true },
+      )
+
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo confirmar la importacion.'
+      if (error instanceof HttpsError) {
+        if (importStarted) {
+          await markImportRunFailed(importRunRef, message)
+        }
+        throw error
+      }
+
+      logger.error('XLSX import confirmation failed.', { groupId, importRunId, message })
+      if (importStarted) {
+        await markImportRunFailed(importRunRef, message)
+      }
+      throw new HttpsError('internal', message)
+    }
+  },
+)
+
+function parseImportRows(buffer: Buffer): ParsedImportRows {
+  const workbook = XLSX.read(buffer, { cellDates: true, type: 'buffer' })
+  const firstSheetName = workbook.SheetNames[0]
+
+  if (!firstSheetName) {
+    throw new Error('El archivo XLSX no tiene hojas.')
+  }
+
+  const sheet = workbook.Sheets[firstSheetName]
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: '',
+    raw: false,
+  })
+
+  validateRequiredColumns(rows)
+
+  const errors: ImportValidationError[] = []
+  const normalizedRows: NormalizedRow[] = []
+  const seenDocumentIds = new Map<string, number>()
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2
+    const result = normalizeRow(row, rowNumber)
+
+    if ('errors' in result) {
+      errors.push(...result.errors)
+      return
+    }
+
+    const previousRow = seenDocumentIds.get(result.row.documentId)
+    if (previousRow) {
+      errors.push({
+        rowNumber,
+        field: 'Documento',
+        message: `Documento duplicado en el archivo. Ya aparece en la fila ${previousRow}.`,
+        severity: 'error',
+      })
+      return
+    }
+
+    seenDocumentIds.set(result.row.documentId, rowNumber)
+    normalizedRows.push(result.row)
+    errors.push(...result.warnings)
+  })
+
+  return {
+    totalRows: rows.length,
+    normalizedRows,
+    errors,
+  }
+}
 
 function validateRequiredColumns(rows: Record<string, unknown>[]) {
   if (!rows.length) {
@@ -284,26 +397,307 @@ async function findExistingDocumentHashes(groupId: string, rows: NormalizedRow[]
   return existing
 }
 
+async function findExistingMemberRefsByHash(groupId: string, rows: PreviewRow[]) {
+  const hashes = [...new Set(rows.map((row) => row.documentIdHash))]
+  const existing = new Map<string, FirebaseFirestore.DocumentReference>()
+  const db = getFirestore()
+
+  for (let index = 0; index < hashes.length; index += 30) {
+    const chunk = hashes.slice(index, index + 30)
+    if (!chunk.length) continue
+
+    const membersSnapshot = await db
+      .collection(`groups/${groupId}/members`)
+      .where('documentIdHash', 'in', chunk)
+      .get()
+
+    membersSnapshot.docs.forEach((doc) => {
+      const value = doc.get('documentIdHash')
+      if (typeof value === 'string') {
+        existing.set(value, doc.ref)
+      }
+    })
+  }
+
+  return existing
+}
+
+async function assertCanConfirmImport(
+  db: FirebaseFirestore.Firestore,
+  groupId: string,
+  uid: string,
+) {
+  const membership = await db.doc(`groups/${groupId}/memberships/${uid}`).get()
+  const role = membership.get('role')
+  const status = membership.get('status')
+
+  if (!membership.exists || status !== 'active' || !['owner', 'leader'].includes(role)) {
+    throw new HttpsError(
+      'permission-denied',
+      'Solo owner o leader activos pueden confirmar importaciones.',
+    )
+  }
+}
+
+async function markImportRunImporting(
+  importRunRef: FirebaseFirestore.DocumentReference,
+  uid: string,
+) {
+  return getFirestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(importRunRef)
+
+    if (!snapshot.exists) {
+      throw new HttpsError('not-found', 'No se encontro el importRun.')
+    }
+
+    const data = snapshot.data() ?? {}
+    const status = data.status
+    const summary = data.summary as { errors?: unknown } | undefined
+
+    if (status === 'imported') {
+      throw new HttpsError('failed-precondition', 'Esta importacion ya fue confirmada.')
+    }
+
+    if (status !== 'preview_ready') {
+      throw new HttpsError('failed-precondition', 'El preview no esta listo para confirmar.')
+    }
+
+    if (Number(summary?.errors ?? 0) > 0) {
+      throw new HttpsError('failed-precondition', 'Corrige los errores del preview antes de importar.')
+    }
+
+    transaction.set(
+      importRunRef,
+      {
+        status: 'importing' satisfies ImportStatus,
+        confirmedBy: uid,
+        confirmedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    )
+
+    return data
+  })
+}
+
+async function markImportRunFailed(
+  importRunRef: FirebaseFirestore.DocumentReference,
+  message: string,
+) {
+  await importRunRef.set(
+    {
+      status: 'failed' satisfies ImportStatus,
+      updatedAt: FieldValue.serverTimestamp(),
+      errors: [
+        {
+          rowNumber: 0,
+          message,
+          severity: 'error' satisfies ImportSeverity,
+        },
+      ],
+    },
+    { merge: true },
+  )
+}
+
+async function readPreviewRows(importRunRef: FirebaseFirestore.DocumentReference) {
+  const snapshot = await importRunRef.collection('previewRows').get()
+
+  return snapshot.docs
+    .map((doc) => previewRowFromData(doc.data()))
+    .sort((a, b) => a.rowNumber - b.rowNumber)
+}
+
+function assertPreviewMatchesParsedRows(previewRows: PreviewRow[], normalizedRows: NormalizedRow[]) {
+  if (previewRows.length !== normalizedRows.length) {
+    throw new HttpsError(
+      'failed-precondition',
+      'El preview no coincide con el archivo fuente. Genera un nuevo preview.',
+    )
+  }
+
+  const normalizedByRow = new Map(normalizedRows.map((row) => [row.rowNumber, row]))
+
+  previewRows.forEach((previewRow) => {
+    const normalizedRow = normalizedByRow.get(previewRow.rowNumber)
+    const documentIdHash = normalizedRow ? hashDocumentId(normalizedRow.documentId) : ''
+
+    if (
+      !normalizedRow ||
+      previewRow.documentIdHash !== documentIdHash ||
+      previewRow.fullName !== normalizedRow.fullName
+    ) {
+      throw new HttpsError(
+        'failed-precondition',
+        'El preview cambio frente al archivo fuente. Genera un nuevo preview.',
+      )
+    }
+  })
+}
+
+async function writeImportedMembers({
+  db,
+  groupId,
+  importRunId,
+  rows,
+  previewRows,
+  existingMembers,
+}: {
+  db: FirebaseFirestore.Firestore
+  groupId: string
+  importRunId: string
+  rows: NormalizedRow[]
+  previewRows: PreviewRow[]
+  existingMembers: Map<string, FirebaseFirestore.DocumentReference>
+}) {
+  const rowsByNumber = new Map(rows.map((row) => [row.rowNumber, row]))
+  const membersCollection = db.collection(`groups/${groupId}/members`)
+  let created = 0
+  let updated = 0
+  let batch = db.batch()
+  let operations = 0
+
+  previewRows.forEach((previewRow) => {
+    const row = rowsByNumber.get(previewRow.rowNumber)
+    const currentMemberRef = existingMembers.get(previewRow.documentIdHash)
+
+    if (!row) {
+      throw new HttpsError(
+        'failed-precondition',
+        `La fila ${previewRow.rowNumber} no existe en el archivo fuente.`,
+      )
+    }
+
+    if (previewRow.action === 'update' && !currentMemberRef) {
+      throw new HttpsError(
+        'failed-precondition',
+        `La fila ${previewRow.rowNumber} ya no tiene miembro existente para actualizar.`,
+      )
+    }
+
+    if (previewRow.action === 'create' && currentMemberRef) {
+      throw new HttpsError(
+        'failed-precondition',
+        `La fila ${previewRow.rowNumber} ahora coincide con un miembro existente. Genera un nuevo preview.`,
+      )
+    }
+  })
+
+  async function commitIfNeeded(force = false) {
+    if (operations === 0 || (!force && operations < maxBatchOperations)) return
+    await batch.commit()
+    batch = db.batch()
+    operations = 0
+  }
+
+  for (const previewRow of previewRows) {
+    const row = rowsByNumber.get(previewRow.rowNumber)
+    if (!row) continue
+
+    const currentMemberRef = existingMembers.get(previewRow.documentIdHash)
+    const isUpdate = Boolean(currentMemberRef)
+    const memberRef = currentMemberRef ?? membersCollection.doc()
+    const now = FieldValue.serverTimestamp()
+    const publicMember = cleanUndefined({
+      firstName: row.firstName,
+      lastName: row.lastName,
+      fullName: row.fullName,
+      gender: row.gender,
+      joinedAt: row.joinedAt,
+      groupRole: row.groupRole,
+      semesterAttendances: row.semesterAttendances,
+      isServer: row.isServer,
+      isServing: row.isServing,
+      status: isUpdate ? undefined : 'active',
+      documentIdHash: previewRow.documentIdHash,
+      importedFrom: 'church-xlsx',
+      lastImportRunId: importRunId,
+      lastImportedAt: now,
+      createdAt: isUpdate ? undefined : now,
+      updatedAt: now,
+    })
+    const privateProfile = cleanUndefined({
+      documentId: row.documentId,
+      birthday: row.birthday,
+      createdAt: isUpdate ? undefined : now,
+      updatedAt: now,
+    })
+
+    batch.set(memberRef, publicMember, { merge: true })
+    batch.set(memberRef.collection('private').doc('profile'), privateProfile, { merge: true })
+    operations += 2
+
+    if (isUpdate) {
+      updated += 1
+    } else {
+      created += 1
+    }
+
+    await commitIfNeeded()
+  }
+
+  await commitIfNeeded(true)
+
+  return {
+    created,
+    updated,
+    skipped: 0,
+  }
+}
+
 async function replacePreviewRows(
   importRunRef: FirebaseFirestore.DocumentReference,
   rows: PreviewRow[],
 ) {
-  const oldRows = await importRunRef.collection('previewRows').limit(500).get()
-  const batch = getFirestore().batch()
-  let operations = 0
+  const db = getFirestore()
+  let oldRows = await importRunRef.collection('previewRows').limit(maxBatchOperations).get()
+  while (!oldRows.empty) {
+    const deleteBatch = db.batch()
 
-  for (const doc of oldRows.docs) {
-    batch.delete(doc.ref)
-    operations += 1
+    oldRows.docs.forEach((doc) => {
+      deleteBatch.delete(doc.ref)
+    })
+
+    await deleteBatch.commit()
+    oldRows = await importRunRef.collection('previewRows').limit(maxBatchOperations).get()
   }
 
-  rows.slice(0, maxPreviewRowsPerDocument).forEach((row) => {
+  let batch = db.batch()
+  let operations = 0
+
+  for (const row of rows) {
     batch.set(importRunRef.collection('previewRows').doc(String(row.rowNumber)), cleanUndefined(row))
     operations += 1
-  })
+
+    if (operations >= maxBatchOperations) {
+      await batch.commit()
+      batch = db.batch()
+      operations = 0
+    }
+  }
 
   if (operations) {
     await batch.commit()
+  }
+}
+
+function previewRowFromData(data: FirebaseFirestore.DocumentData): PreviewRow {
+  return {
+    rowNumber: Number(data.rowNumber ?? 0),
+    action: data.action === 'update' ? 'update' : 'create',
+    firstName: String(data.firstName ?? ''),
+    lastName: String(data.lastName ?? ''),
+    fullName: String(data.fullName ?? ''),
+    documentIdHash: String(data.documentIdHash ?? ''),
+    gender: data.gender === 'F' || data.gender === 'M' ? data.gender : undefined,
+    birthday: stringOrUndefined(data.birthday),
+    joinedAt: stringOrUndefined(data.joinedAt),
+    groupRole: stringOrUndefined(data.groupRole),
+    semesterAttendances:
+      typeof data.semesterAttendances === 'number' ? data.semesterAttendances : undefined,
+    isServer: typeof data.isServer === 'boolean' ? data.isServer : undefined,
+    isServing: typeof data.isServing === 'boolean' ? data.isServing : undefined,
   }
 }
 
@@ -315,6 +709,14 @@ function cleanUndefined<T extends Record<string, unknown>>(value: T) {
 
 function normalizeText(value: unknown) {
   return String(value ?? '').trim()
+}
+
+function stringFromCallable(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function stringOrUndefined(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
 
 function normalizeOptionalText(value: unknown) {

@@ -9,11 +9,12 @@ the current app is local-only.
   `localStorage`.
 - Firebase Auth identifies users.
 - Firestore stores minimal user profiles, remote groups, memberships,
-  `defaultGroupId`, importRun preview metadata, and the prepared remote member
-  security model.
+  `defaultGroupId`, importRun preview metadata, and imported remote member
+  public/private profile records after explicit confirmation.
 - Firebase Storage stores official XLSX uploads for backend processing in the
   current import phase.
-- Cloud Functions processes XLSX files to generate preview data.
+- Cloud Functions processes XLSX files to generate preview data and confirms
+  final imported-member writes after owner/leader approval.
 - Analytics and remote logging of sensitive content remain out of scope.
 
 ## Rules
@@ -30,8 +31,9 @@ the current app is local-only.
 - Official XLSX uploads are allowed only for the backend-processing import
   phase and must go through Storage rules, group membership checks, and preview.
 - Do not parse XLSX in the browser.
-- Do not write final member records until member/private profile rules and
-  tests exist.
+- Write final member records only through the backend confirmation function,
+  after member/private profile rules and tests exist and the user approves the
+  preview.
 - Store full `documentId` only in member private profile if it is needed; never
   in the public member doc or previewRows.
 - Treat `documentIdHash` as technical metadata for deduplication. Do not show it

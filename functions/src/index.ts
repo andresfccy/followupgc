@@ -1,1 +1,1 @@
-export { processChurchXlsxImport } from './importXlsx.js'
+export { confirmChurchXlsxImport, processChurchXlsxImport } from './importXlsx.js'

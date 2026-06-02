@@ -483,9 +483,73 @@ Validation:
 
 Remaining risk:
 
-- Final confirmed import write is still not implemented.
+- Final confirmed import write was still pending at this point; it is covered by
+  the Phase 5D entry below.
 - A dedicated Cloud Function unit/integration test for preview `create` versus
   `update` detection is still pending.
+
+## 2026-06-02: Firebase Phase 5D Confirmed XLSX Import Writes
+
+Phase 5D implements explicit preview approval and controlled backend writes for
+official church Excel imports.
+
+What changed:
+
+- Added `confirmChurchXlsxImport`, a callable Cloud Function that:
+  - requires authenticated active `owner` or `leader` membership;
+  - accepts only `groupId` and `importRunId` from the client;
+  - requires `preview_ready` status with no blocking preview errors;
+  - re-reads the source XLSX from Storage;
+  - reuses the backend normalization path;
+  - verifies preview rows still match the source file;
+  - writes public member docs and private profile docs in Firestore batches;
+  - stores confirmation result metadata on the importRun.
+- Public member docs receive operational church-system fields,
+  `documentIdHash`, `importedFrom`, `lastImportRunId`, and timestamps.
+- Private profiles receive the full `documentId` and birthday.
+- The frontend now exposes `confirmExcelImportRun` through
+  `src/lib/remoteImports.ts`.
+- The import UI now opens a review popup with the full create/update table
+  before approving the write.
+- The UI no longer displays `documentIdHash`.
+- Preview row storage now writes all preview rows in batches instead of
+  truncating to the first 400 rows.
+
+Files touched:
+
+- `functions/src/importXlsx.ts`
+- `functions/src/index.ts`
+- `src/lib/firebase.ts`
+- `src/lib/remoteImports.ts`
+- `src/App.tsx`
+- `docs/ai/security-and-privacy.md`
+- `docs/ai/development-roadmap.md`
+- `docs/ai/firebase-xlsx-backend-processing.md`
+- `docs/ai/excel-to-firestore-initial-import-plan.md`
+- `docs/ai/firestore-members-security-model.md`
+- `docs/ai/handoff/current-state.md`
+- `docs/ai/handoff/next-actions.md`
+
+Validation status:
+
+- `pnpm --dir functions lint` passed with the local Node 24 vs function Node 20
+  engine warning.
+- `pnpm --dir functions build` passed with the same engine warning.
+- `pnpm lint` passed.
+- `pnpm build` passed with the known Vite chunk-size warning.
+- `pnpm test:rules` passed: 27 tests executed, 27 passed, 0 failed.
+- `pnpm test:storage-rules` passed: 4 tests executed, 4 passed, 0 failed.
+- `pnpm dev -- --host 127.0.0.1` started after sandbox approval; `curl -L
+  http://localhost:5173/` returned the Vite HTML shell. The server was stopped
+  afterward.
+
+Remaining risk:
+
+- Dedicated Cloud Function tests for `confirmChurchXlsxImport` are still
+  pending.
+- Storage source file retention/deletion is still not finalized.
+- Remote members are written but not yet read into the main app UI; Phase 5E
+  remains next.
 
 ## 2026-05-29: Firebase Phase 5C Rules, Storage Tests, And Member Security Model
 
@@ -523,7 +587,8 @@ Validation status:
 
 Remaining risk:
 
-- Final confirmed import write is still not implemented.
+- Final confirmed import write was still pending at this point; it is covered by
+  the Phase 5D entry above.
 - Last-owner protection is still pending.
 - Viewer can read public member docs; this is safe only while full
   `documentId`, phone, birthday, and pastoral notes stay out of that document.

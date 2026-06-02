@@ -9,6 +9,7 @@ import {
   type DocumentData,
   type Unsubscribe,
 } from 'firebase/firestore'
+import { httpsCallable } from 'firebase/functions'
 import { ref, uploadBytes } from 'firebase/storage'
 import { firebaseRuntime } from '@/lib/firebase'
 
@@ -16,6 +17,8 @@ export type ExcelImportRunStatus =
   | 'uploaded'
   | 'processing'
   | 'preview_ready'
+  | 'importing'
+  | 'imported'
   | 'failed'
   | 'cancelled'
 
@@ -51,6 +54,7 @@ export type ExcelImportRun = {
   summary?: ExcelImportRunSummary
   errors?: RemoteImportValidationError[]
   previewRowCount?: number
+  result?: ExcelImportConfirmResult
 }
 
 export type ExcelImportPreviewRow = {
@@ -67,6 +71,12 @@ export type ExcelImportPreviewRow = {
   semesterAttendances?: number
   isServer?: boolean
   isServing?: boolean
+}
+
+export type ExcelImportConfirmResult = {
+  created: number
+  updated: number
+  skipped: number
 }
 
 const missingFirebaseConfigMessage =
@@ -86,6 +96,14 @@ function requireStorage() {
   }
 
   return firebaseRuntime.storage
+}
+
+function requireFunctions() {
+  if (!firebaseRuntime.functions) {
+    throw new Error(missingFirebaseConfigMessage)
+  }
+
+  return firebaseRuntime.functions
 }
 
 export async function createExcelImportRun(user: User, groupId: string, file: File) {
@@ -115,6 +133,16 @@ export async function uploadExcelImportFile(storagePath: string, file: File) {
     contentType:
       file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
+}
+
+export async function confirmExcelImportRun(groupId: string, importRunId: string) {
+  const confirmImport = httpsCallable<
+    { groupId: string; importRunId: string },
+    ExcelImportConfirmResult
+  >(requireFunctions(), 'confirmChurchXlsxImport')
+  const result = await confirmImport({ groupId, importRunId })
+
+  return result.data
 }
 
 export function subscribeExcelImportRun(
@@ -163,6 +191,7 @@ function mapImportRun(id: string, data: DocumentData): ExcelImportRun {
       ? data.errors.map(mapValidationError).filter((error): error is RemoteImportValidationError => Boolean(error))
       : undefined,
     previewRowCount: numberOrUndefined(data.previewRowCount),
+    result: mapConfirmResult(data.result),
   }
 }
 
@@ -200,6 +229,17 @@ function mapSummary(value: unknown): ExcelImportRunSummary | undefined {
   }
 }
 
+function mapConfirmResult(value: unknown): ExcelImportConfirmResult | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const data = value as Record<string, unknown>
+
+  return {
+    created: Number(data.created ?? 0),
+    updated: Number(data.updated ?? 0),
+    skipped: Number(data.skipped ?? 0),
+  }
+}
+
 function mapValidationError(value: unknown): RemoteImportValidationError | null {
   if (!value || typeof value !== 'object') return null
   const data = value as Record<string, unknown>
@@ -215,6 +255,8 @@ function mapValidationError(value: unknown): RemoteImportValidationError | null 
 function statusOrUploaded(value: unknown): ExcelImportRunStatus {
   return value === 'processing' ||
     value === 'preview_ready' ||
+    value === 'importing' ||
+    value === 'imported' ||
     value === 'failed' ||
     value === 'cancelled'
     ? value

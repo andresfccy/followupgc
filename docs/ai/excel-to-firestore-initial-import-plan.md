@@ -103,8 +103,7 @@ the frontend remains responsible for upload, status, preview, and confirmation.
 
 ## Remote Member Model
 
-Before writing real imported members, define the remote member shape under a
-group, for example:
+The active Phase 5C/5D remote member shape is:
 
 ```txt
 groups/{groupId}/members/{memberId}
@@ -112,21 +111,21 @@ groups/{groupId}/members/{memberId}
   lastName
   fullName
   gender?
-  birthday?
   joinedAt?
   groupRole?
   semesterAttendances?
   isServer?
   isServing?
   status
+  documentIdHash?
+  importedFrom?
+  lastImportRunId?
+  lastImportedAt?
   createdAt
   updatedAt
-  importedFrom?
-  lastImportId?
 ```
 
-`documentId` is sensitive. Do not place it in a broad-readable member document
-until viewer access is decided.
+`documentId` is sensitive. Do not place it in the public member document.
 
 ## Public And Private Data Split
 
@@ -134,16 +133,17 @@ Firestore Rules cannot hide individual fields from a readable document.
 Because `documentId` is sensitive, use a private profile or sensitive
 subdocument before allowing viewer access to members.
 
-Possible shape:
+Active shape:
 
 ```txt
 groups/{groupId}/members/{memberId}
   public/member-operational fields safe for active member reads
 
-groups/{groupId}/memberPrivateProfiles/{memberId}
-  documentId
-  importSource
-  importRawFingerprint?
+groups/{groupId}/members/{memberId}/private/profile
+  documentId?
+  phone?
+  birthday?
+  createdAt
   updatedAt
 ```
 

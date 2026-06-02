@@ -3,7 +3,8 @@
 ## Scope
 
 Phase 5B processes the official church XLSX in backend/serverless
-infrastructure and generates an import preview.
+infrastructure and generates an import preview. Phase 5D adds explicit
+confirmation and controlled member writes from that preview.
 
 The frontend does not parse XLSX. It only:
 
@@ -11,7 +12,8 @@ The frontend does not parse XLSX. It only:
 - uploads the file to Firebase Storage;
 - listens to Firestore status and preview data;
 - shows summary/errors/preview rows;
-- leaves final confirmation and member writes for a later phase.
+- opens a confirmation popup with the create/update table;
+- calls the backend confirmation function after approval.
 
 ## Flow
 
@@ -26,6 +28,10 @@ owner/leader selects remote group
 -> function normalizes rows
 -> function writes summary/errors/previewRows
 -> function marks importRun preview_ready or failed
+-> frontend opens review popup and user approves import
+-> callable function revalidates the XLSX against previewRows
+-> function writes public members and private profiles
+-> function marks importRun imported or failed
 ```
 
 ## Storage Path
@@ -40,16 +46,18 @@ document ids.
 
 ## Cloud Function
 
-Function:
+Functions:
 
 ```txt
 processChurchXlsxImport
+confirmChurchXlsxImport
 ```
 
 Trigger:
 
 ```txt
-onObjectFinalized
+processChurchXlsxImport: onObjectFinalized
+confirmChurchXlsxImport: onCall
 ```
 
 It ignores files outside the expected `imports/{groupId}/{importRunId}/source.xlsx`
@@ -68,9 +76,13 @@ groups/{groupId}/importRuns/{importRunId}
   startedAt
   updatedAt
   completedAt?
+  confirmedBy?
+  confirmedAt?
+  importedAt?
   summary?
   errors?
   previewRowCount?
+  result?
 
 groups/{groupId}/importRuns/{importRunId}/previewRows/{rowId}
   rowNumber
@@ -89,13 +101,15 @@ groups/{groupId}/importRuns/{importRunId}/previewRows/{rowId}
 ```
 
 `documentId` is not stored in preview rows. The function stores a SHA-256 hash
-for matching/display context.
+for matching only. Do not display `documentIdHash` in UI.
 
 ## Statuses
 
 - `uploaded`: frontend created the run and/or uploaded the file.
 - `processing`: Cloud Function is processing the XLSX.
 - `preview_ready`: preview rows, summary, and errors are available.
+- `importing`: callable confirmation is writing members.
+- `imported`: confirmed write completed.
 - `failed`: processing failed.
 - `cancelled`: reserved for future cancellation flow.
 
@@ -147,16 +161,15 @@ Boolean values accept `Si`, `Sí`, `SI`, `sí`, `true`, `x`, `1`, `No`, `NO`,
 - Clients cannot write previewRows; only Cloud Functions/Admin SDK writes them.
 - The frontend does not parse XLSX.
 - The function must not log document ids or raw row contents.
-- The final member/private profile model is not written in this phase.
+- Final writes go only through `confirmChurchXlsxImport`.
+- Full `documentId` is written only to
+  `groups/{groupId}/members/{memberId}/private/profile`.
 
 ## What This Phase Does Not Do
 
-- It does not write final members.
-- It does not create member private profiles.
 - It does not make remote members the primary app source.
 - It does not migrate localStorage.
 - It does not process meetings, attendance, or pastoral notes.
-- It does not implement final confirmation.
 
 ## Local Testing
 
@@ -220,9 +233,7 @@ firebase deploy --only hosting
 ## Risks
 
 - Storage file retention/deletion is not finalized.
-- Final import writes still need a controlled backend confirmation path.
-- Update detection is limited until the private profile model exists; current
-  matching checks `memberPrivateProfiles.documentIdHash` when present.
+- Dedicated Cloud Function tests for final confirmation are still pending.
 - Viewer access to public member docs depends on keeping full document ids and
   private fields out of those docs.
 - Cloud Functions/Storage production use may require billing setup.
@@ -232,6 +243,6 @@ firebase deploy --only hosting
 - Phase 5C: completed security model, Firestore Rules tests, and Storage Rules
   tests for importRuns, previewRows, members, private profiles, and XLSX
   uploads.
-- Phase 5D: confirmed backend write of imported members to Firestore after
-  explicit preview confirmation.
+- Phase 5D: implemented confirmed backend write of imported members to
+  Firestore after explicit preview confirmation.
 - Phase 5E: read remote members from Firestore.
