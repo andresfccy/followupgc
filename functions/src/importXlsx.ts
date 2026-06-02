@@ -268,12 +268,12 @@ async function findExistingDocumentHashes(groupId: string, rows: NormalizedRow[]
     const chunk = hashes.slice(index, index + 30)
     if (!chunk.length) continue
 
-    const privateSnapshot = await db
-      .collection(`groups/${groupId}/memberPrivateProfiles`)
+    const membersSnapshot = await db
+      .collection(`groups/${groupId}/members`)
       .where('documentIdHash', 'in', chunk)
       .get()
 
-    privateSnapshot.docs.forEach((doc) => {
+    membersSnapshot.docs.forEach((doc) => {
       const value = doc.get('documentIdHash')
       if (typeof value === 'string') {
         existing.add(value)

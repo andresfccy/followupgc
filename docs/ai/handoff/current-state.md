@@ -448,10 +448,44 @@ Validation status:
 Remaining risk:
 
 - Storage file retention/deletion is not finalized.
-- Update detection is limited until the member private profile model exists;
-  the function checks `memberPrivateProfiles.documentIdHash` if present.
+- Preview update detection checks existing public member docs by
+  `groups/{groupId}/members.documentIdHash`.
 - Cloud Functions/Storage production deploy may require Blaze plan.
 - Phase 5C rules/tests now gate final member writes.
+
+## 2026-06-02: XLSX Preview Update Detection Fix
+
+The backend XLSX preview now aligns with the Phase 5C member security model.
+
+What changed:
+
+- Fixed `functions/src/importXlsx.ts` so preview duplicate/update detection
+  queries `groups/{groupId}/members` by `documentIdHash`.
+- Removed the stale lookup against `groups/{groupId}/memberPrivateProfiles`,
+  which is not the active rules/model path.
+- Full `documentId` remains out of public member docs and preview rows.
+
+Why it changed:
+
+- Existing imported members store `documentIdHash` on the public member doc.
+  Looking in the stale private-profile collection would make reimports mark
+  existing rows as `create` instead of `update`.
+
+Validation:
+
+- `pnpm --dir functions lint` passed with the local Node 24 vs function Node 20
+  engine warning.
+- `pnpm --dir functions build` passed with the same engine warning.
+- `pnpm lint` passed.
+- `pnpm build` passed with the known Vite chunk-size warning.
+- `pnpm test:rules` passed: 27 tests executed, 27 passed, 0 failed.
+- `pnpm test:storage-rules` passed: 4 tests executed, 4 passed, 0 failed.
+
+Remaining risk:
+
+- Final confirmed import write is still not implemented.
+- A dedicated Cloud Function unit/integration test for preview `create` versus
+  `update` detection is still pending.
 
 ## 2026-05-29: Firebase Phase 5C Rules, Storage Tests, And Member Security Model
 
