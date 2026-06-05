@@ -6,7 +6,7 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing'
 
-const projectId = 'followupgc'
+const projectId = 'demo-followupgc-rules'
 const now = '2026-05-29T00:00:00.000Z'
 const validContentType =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

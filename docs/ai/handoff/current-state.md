@@ -92,15 +92,10 @@ Validation:
 
 - `pnpm lint` passed.
 - `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
-- `pnpm --dir functions build` passed with a local Node 26 warning because
-  functions target Node 20.
-- `pnpm test:rules` could not run because the `firebase` CLI is not installed
-  in this environment.
+- `pnpm functions:build` passed.
 
 Remaining:
 
-- Install or expose Firebase CLI locally and run `pnpm test:rules` before
-  deploying rules.
 - Add dedicated callable tests for `deleteMeeting`.
 - Implement Phase 5H remote attendance under meeting subcollections.
 
@@ -122,8 +117,34 @@ What changed:
 
 Validation:
 
+- `CI=true pnpm install` passed after approving required pnpm build scripts for
+  `@firebase/util` and `protobufjs`.
 - `pnpm lint` passed.
 - `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm functions:build` passed.
+
+## 2026-06-04: Java 21 Emulator Runtime Installed
+
+OpenJDK 21 is installed through Homebrew for Firebase Emulator Suite support.
+
+What changed:
+
+- Installed `openjdk@21` with Homebrew.
+- Updated `scripts/with-node-22.sh` to export Homebrew OpenJDK 21 as
+  `JAVA_HOME` and prepend it to `PATH` when present.
+- Updated rules-test scripts to run against explicit demo project
+  `demo-followupgc-rules`.
+- Updated `tests/storage.rules.test.mjs` to use the same demo project so
+  Storage Rules can see Firestore membership fixtures.
+- Created `~/.config` for Firebase CLI local config writes.
+
+Validation:
+
+- `scripts/with-node-22.sh node -v` reports `v22.22.3`.
+- `scripts/with-node-22.sh java -version` reports OpenJDK `21.0.11`.
+- `scripts/with-node-22.sh firebase --version` reports `15.19.1`.
+- `pnpm test:rules` passed: 30 executed, 30 passed, 0 failed.
+- `pnpm test:storage-rules` passed: 4 executed, 4 passed, 0 failed.
 
 ## 2026-05-22: Agent Harness Structure
 
