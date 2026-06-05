@@ -4,13 +4,13 @@
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
-    "lint": "tsc --noEmit",
-    "serve": "pnpm build && firebase emulators:start --only functions,firestore,storage",
-    "deploy": "firebase deploy --only functions"
+    "build": "../scripts/with-node-22.sh tsc",
+    "lint": "../scripts/with-node-22.sh tsc --noEmit",
+    "serve": "../scripts/with-node-22.sh sh -c 'pnpm build && firebase emulators:start --only functions,firestore,storage'",
+    "deploy": "../scripts/with-node-22.sh firebase deploy --only functions"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "^5.0.2",

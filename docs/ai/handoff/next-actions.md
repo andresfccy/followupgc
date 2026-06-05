@@ -31,6 +31,10 @@
 - Phase 5G is implemented: remote meetings are stored under
   `groups/{groupId}/meetings`, and owner/leader users can create, edit, and
   request deletion from the UI.
+- Runtime tooling now targets Node 22. Prefer root scripts such as
+  `pnpm functions:build`, `pnpm functions:serve`, and `pnpm functions:deploy`
+  so `scripts/with-node-22.sh` can select the expected Node version through
+  `nvm` before running functions commands.
 - Next recommended phase: run `pnpm test:rules` once Firebase CLI is available,
   add callable tests for `deleteMeeting`, then implement Phase 5H remote
   attendance under `groups/{groupId}/meetings/{meetingId}/attendance`.

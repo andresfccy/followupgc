@@ -40,8 +40,11 @@ What changed:
 
 Validation:
 
+- `CI=true pnpm install` passed after approving required pnpm build scripts for
+  `@firebase/util` and `protobufjs`.
 - `pnpm lint` passed.
 - `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm functions:build` passed.
 - `pnpm dev --host 127.0.0.1` started successfully with escalated permissions,
   but a sandbox `curl` check could not connect back to the escalated server.
 
@@ -100,6 +103,27 @@ Remaining:
   deploying rules.
 - Add dedicated callable tests for `deleteMeeting`.
 - Implement Phase 5H remote attendance under meeting subcollections.
+
+## 2026-06-04: Node 22 Runtime Alignment
+
+The project now targets Node 22 because it is the newest stable runtime
+currently supported by Firebase Cloud Functions.
+
+What changed:
+
+- Added root and functions `.nvmrc` / `.node-version` files with Node `22`.
+- Updated root and functions `engines` to require Node 22.
+- Updated Firebase Functions runtime from `nodejs20` to `nodejs22`.
+- Added `scripts/with-node-22.sh` so project scripts load `nvm` and run under
+  Node 22 when available.
+- Wrapped root app, rules-test, and functions scripts with the Node 22 helper.
+- Added root `functions:*` scripts so function commands can be run through the
+  Node 22 wrapper before invoking `pnpm --dir functions ...`.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
 
 ## 2026-05-22: Agent Harness Structure
 

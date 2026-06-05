@@ -3,13 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23",
+    "pnpm": ">=11 <12"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "test:rules": "firebase emulators:exec --only firestore \"node --test tests/firestore.rules.test.mjs\"",
-    "test:storage-rules": "firebase emulators:exec --only firestore,storage \"node --test tests/storage.rules.test.mjs\""
+    "dev": "scripts/with-node-22.sh vite",
+    "build": "scripts/with-node-22.sh sh -c 'tsc -b && vite build'",
+    "lint": "scripts/with-node-22.sh eslint .",
+    "preview": "scripts/with-node-22.sh vite preview",
+    "functions:build": "scripts/with-node-22.sh pnpm --dir functions build",
+    "functions:lint": "scripts/with-node-22.sh pnpm --dir functions lint",
+    "functions:serve": "scripts/with-node-22.sh pnpm --dir functions serve",
+    "functions:deploy": "scripts/with-node-22.sh pnpm --dir functions deploy",
+    "test:rules": "scripts/with-node-22.sh firebase emulators:exec --only firestore \"node --test tests/firestore.rules.test.mjs\"",
+    "test:storage-rules": "scripts/with-node-22.sh firebase emulators:exec --only firestore,storage \"node --test tests/storage.rules.test.mjs\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -28,7 +36,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@firebase/rules-unit-testing": "^5.0.1",
-    "@types/node": "^24.12.3",
+    "@types/node": "^22.17.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
