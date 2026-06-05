@@ -26,6 +26,10 @@ Source of truth: `src/domain/types.ts`.
 - Timeline entries belong to members and should remain chronological. Remote
   pastoral notes are stored under
   `groups/{groupId}/members/{memberId}/pastoralNotes/{noteId}`.
+- Remote group settings are stored on the group document at
+  `groups/{groupId}`. The current settings fields are `name` and
+  `regularWeekday`; membership mirrors should not be treated as the canonical
+  source for group settings.
 - Weekdays use JavaScript `Date#getDay()` values: `0` Sunday through `6`
   Saturday.
 - Prefer additive fields over renaming stored fields.

@@ -212,6 +212,121 @@ test('inactive users and users without membership cannot read a group', async ()
   await assertFails(authedDb('stranger-a').doc('groups/group-a').get())
 })
 
+test('only owner can update group settings', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'leader-a', role: 'leader', status: 'active' },
+      { uid: 'viewer-a', role: 'viewer', status: 'active' },
+      { uid: 'inactive-a', role: 'owner', status: 'inactive' },
+    ],
+  })
+
+  await assertSucceeds(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        name: 'Grupo actualizado',
+        regularWeekday: 5,
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('leader-a').doc('groups/group-a').set(
+      {
+        name: 'Cambio no permitido',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('viewer-a').doc('groups/group-a').set(
+      {
+        regularWeekday: 2,
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('inactive-a').doc('groups/group-a').set(
+      {
+        name: 'Owner inactivo',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('stranger-a').doc('groups/group-a').set(
+      {
+        name: 'Sin membership',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+})
+
+test('group settings update validates shape and keeps createdBy stable', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [{ uid: 'owner-a', role: 'owner', status: 'active' }],
+  })
+
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        name: '',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        regularWeekday: 9,
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        createdBy: 'other-user',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a').set(
+      {
+        name: 'Grupo actualizado',
+        unexpected: true,
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+})
+
 test('active group members can read memberships according to current rules', async () => {
   await seedGroup({
     groupId: 'group-a',

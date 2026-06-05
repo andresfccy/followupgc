@@ -56,7 +56,13 @@ import {
   subscribeRemotePastoralNotes,
   type RemotePastoralNote,
 } from '@/lib/remotePastoralNotes'
-import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
+import {
+  createRemoteGroup,
+  setDefaultGroupId,
+  subscribeRemoteGroup,
+  updateRemoteGroupSettings,
+  type RemoteGroup,
+} from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { clearLegacyGroupStorage } from '@/lib/legacyLocalStorage'
 import { cn } from '@/lib/utils'
@@ -104,6 +110,11 @@ function App() {
     notes: RemotePastoralNote[]
     error: string
   }>({ groupId: '', memberId: '', notes: [], error: '' })
+  const [remoteGroupState, setRemoteGroupState] = useState<{
+    groupId: string
+    group: RemoteGroup | null
+    error: string
+  }>({ groupId: '', group: null, error: '' })
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [editingMeetingId, setEditingMeetingId] = useState('')
@@ -116,8 +127,12 @@ function App() {
   const [isImportReviewOpen, setIsImportReviewOpen] = useState(false)
   const [isConfirmingImport, setIsConfirmingImport] = useState(false)
   const [authStatus, setAuthStatus] = useState('')
-  const meetingWeekday = 5 as Weekday
-  const groupName = authSession.currentMembership?.groupName ?? 'FollowUpGC'
+  const remoteGroup =
+    remoteGroupState.groupId === authSession.currentGroupId ? remoteGroupState.group : null
+  const remoteGroupError =
+    remoteGroupState.groupId === authSession.currentGroupId ? remoteGroupState.error : ''
+  const meetingWeekday = remoteGroup?.regularWeekday ?? (5 as Weekday)
+  const groupName = remoteGroup?.name ?? authSession.currentMembership?.groupName ?? 'FollowUpGC'
   const sessions =
     remoteMeetingsState.groupId === authSession.currentGroupId ? remoteMeetingsState.meetings : []
   const remoteMeetingsError =
@@ -181,6 +196,9 @@ function App() {
     authSession.currentMembership &&
       ['owner', 'leader'].includes(authSession.currentMembership.role),
   )
+  const canManageGroupSettings = Boolean(
+    authSession.currentMembership && authSession.currentMembership.role === 'owner',
+  )
 
   const heldSessions = sessions.filter((session) => session.status === 'held')
   const presentCount = attendances.filter((item) => item.status === 'present').length
@@ -196,6 +214,20 @@ function App() {
   useEffect(() => {
     clearLegacyGroupStorage()
   }, [])
+
+  useEffect(() => {
+    if (!authSession.currentGroupId) {
+      return undefined
+    }
+
+    return subscribeRemoteGroup(authSession.currentGroupId, ({ group, error }) => {
+      setRemoteGroupState({
+        groupId: authSession.currentGroupId,
+        group,
+        error,
+      })
+    })
+  }, [authSession.currentGroupId])
 
   useEffect(() => {
     if (!authSession.currentGroupId) {
@@ -568,6 +600,29 @@ function App() {
     }
   }
 
+  async function handleUpdateGroupSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!authSession.currentGroupId || !canManageGroupSettings) {
+      setAuthStatus('Solo owner activo puede actualizar parametros del grupo.')
+      return
+    }
+
+    const form = new FormData(event.currentTarget)
+    const weekday = Number(form.get('regularWeekday'))
+
+    try {
+      await updateRemoteGroupSettings(authSession.currentGroupId, {
+        name: String(form.get('groupName') ?? ''),
+        regularWeekday: weekday as Weekday,
+      })
+      await authSession.refresh()
+      setAuthStatus('Parametros del grupo actualizados en Firebase.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudieron guardar parametros.')
+    }
+  }
+
   return (
     <main className="min-h-svh bg-stone-50 text-slate-950">
       <section className="border-b border-slate-200 bg-white">
@@ -877,23 +932,48 @@ function App() {
           </Panel>
 
           <Panel title="Parametros" icon={Settings}>
-            <label className="grid gap-1 text-sm font-medium text-slate-700">
-              Dia regular de reunion
-              <select
-                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
-                disabled
-                value={meetingWeekday}
+            <form
+              className="grid gap-3"
+              key={`${authSession.currentGroupId}-${groupName}-${meetingWeekday}`}
+              onSubmit={handleUpdateGroupSettings}
+            >
+              <Field
+                defaultValue={groupName}
+                disabled={!canManageGroupSettings}
+                label="Nombre del grupo"
+                name="groupName"
+                placeholder="Nombre del grupo"
+              />
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Dia regular de reunion
+                <select
+                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
+                  defaultValue={meetingWeekday}
+                  disabled={!canManageGroupSettings}
+                  name="regularWeekday"
+                >
+                  {weekdayOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                disabled={!canManageGroupSettings}
               >
-                {weekdayOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <Settings size={16} /> Guardar parametros
+              </button>
+            </form>
+            {remoteGroupError ? (
+              <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                {remoteGroupError}
+              </p>
+            ) : null}
             <p className="mt-3 text-sm text-slate-600">
-              Dia configurado: {getWeekdayLabel(meetingWeekday)}. La edicion remota de parametros
-              se habilitara en una fase posterior.
+              Dia configurado: {getWeekdayLabel(meetingWeekday)}.
+              {!canManageGroupSettings ? ' Solo owner activo puede editar parametros.' : ''}
             </p>
           </Panel>
         </aside>
@@ -1514,12 +1594,14 @@ function Panel({
 
 function Field({
   defaultValue,
+  disabled = false,
   label,
   name,
   placeholder,
   type = 'text',
 }: {
   defaultValue?: string
+  disabled?: boolean
   label: string
   name: string
   placeholder?: string
@@ -1529,8 +1611,9 @@ function Field({
     <label className="grid gap-1 text-sm font-medium text-slate-700">
       {label}
       <input
-        className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 outline-none focus:border-emerald-600"
+        className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 outline-none focus:border-emerald-600 disabled:bg-slate-100 disabled:text-slate-500"
         defaultValue={defaultValue}
+        disabled={disabled}
         name={name}
         placeholder={placeholder}
         type={type}

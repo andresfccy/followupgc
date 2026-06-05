@@ -64,8 +64,8 @@ What changed:
 
 Remaining:
 
-- Implement Firebase write/read modules for meetings, attendance, pastoral
-  notes, and group settings before re-enabling those forms.
+- Implement owner-managed role and membership administration before inviting or
+  assigning additional users to groups.
 
 ## 2026-06-04: Phase 5G Remote Meetings Implemented
 
@@ -154,6 +154,37 @@ Validation:
 - `pnpm lint` passed.
 - `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
 - `pnpm test:rules` passed: 36 executed, 36 passed, 0 failed.
+
+## 2026-06-05: Phase 5J Remote Group Settings Implemented
+
+Remote group settings are implemented as Firebase production data on the group
+document.
+
+What changed:
+
+- Extended `src/lib/remoteGroups.ts` with a group document subscription and
+  owner settings update repository.
+- Updated `src/App.tsx` so the Parametros form reads and writes the selected
+  group's `name` and `regularWeekday` from Firestore.
+- The selected group's canonical name and meeting weekday now come from
+  `groups/{groupId}` first, with membership mirror values only as a fallback
+  while the group document is loading.
+- Extended `firestore.rules` with validated owner-only group settings updates.
+- Extended Firestore Rules tests with owner-only access and settings shape
+  coverage.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm test:rules` passed: 38 executed, 38 passed, 0 failed.
+
+Remaining:
+
+- Membership mirrors may still contain stale group names until a later
+  membership/mirror synchronization phase updates them.
+- Implement owner-managed role and membership administration before inviting or
+  assigning additional users to groups.
 
 ## 2026-06-04: Node 22 Runtime Alignment
 

@@ -41,8 +41,11 @@
 - Phase 5I is implemented: remote pastoral notes are stored under
   `groups/{groupId}/members/{memberId}/pastoralNotes/{noteId}`, and
   owner/leader users can add notes from the bitacora UI.
-- Next recommended phase: implement remote group settings before re-enabling
-  the parametros form.
+- Phase 5J is implemented: remote group settings are stored on
+  `groups/{groupId}`, and owner users can edit the group name and regular
+  meeting weekday from the Parametros form.
+- Next recommended phase: implement owner-managed membership and role
+  administration, including synchronization for user membership mirrors.
 - Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
   `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
@@ -65,7 +68,7 @@
   initial Firestore rules.
 - Firebase Phase 4.5 now has Firestore Rules tests in
   `tests/firestore.rules.test.mjs` and a `pnpm test:rules` script.
-- `pnpm test:rules` passed locally with Java 21: 36 executed, 36 passed,
+- `pnpm test:rules` passed locally with Java 21: 38 executed, 38 passed,
   0 failed, exit code 0.
 - `pnpm test:storage-rules` passed locally with Java 21: 4 executed, 4 passed,
   0 failed, exit code 0.
@@ -76,8 +79,8 @@
   hide individual fields such as `documentId` inside readable documents.
 - Design last-owner protection before advanced role administration. Firestore
   Rules alone cannot reliably count remaining owners.
-- Extend rules tests when group settings or future role administration begin
-  writing to Firestore.
+- Extend rules tests when future role administration begins writing to
+  Firestore.
 - Keep user membership mirrors synchronized with authoritative group
   memberships.
 - Add owner-managed leader/viewer assignment before inviting or assigning more
@@ -89,5 +92,5 @@
 - Do not migrate localStorage into Firestore. Existing `followupgc-data` should
   be cleared or ignored during the Firebase-only transition; never upload seeds,
   demo data, local development data, or local test data.
-- Implement Firebase repositories and rules tests before re-enabling writes for
-  meetings, attendance, pastoral notes, or group settings.
+- Keep Firebase repositories and rules tests as the gate before enabling new
+  production writes.

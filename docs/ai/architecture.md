@@ -13,7 +13,8 @@ library.
 ## Boundaries
 
 - `src/domain/types.ts`: stable domain vocabulary.
-- `src/lib/remoteGroups.ts`: Firestore group and membership repository.
+- `src/lib/remoteGroups.ts`: Firestore group, group settings, and membership
+  repository.
 - `src/lib/remoteImports.ts`: Storage/importRun/callable import repository.
 - `src/lib/remoteMembers.ts`: Firestore remote member read repository.
 - `src/lib/remoteMeetings.ts`: Firestore meeting repository and callable

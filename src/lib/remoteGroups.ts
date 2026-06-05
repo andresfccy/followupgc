@@ -3,11 +3,14 @@ import {
   collection,
   doc,
   getDocs,
+  onSnapshot,
   serverTimestamp,
   setDoc,
+  updateDoc,
   writeBatch,
   type DocumentData,
   type QueryDocumentSnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore'
 import type { Weekday } from '@/domain/types'
 import { firebaseRuntime } from '@/lib/firebase'
@@ -43,6 +46,16 @@ export type CreateRemoteGroupInput = {
   name: string
   regularWeekday?: Weekday
   makeDefault: boolean
+}
+
+export type RemoteGroupSettingsInput = {
+  name: string
+  regularWeekday: Weekday
+}
+
+export type RemoteGroupState = {
+  group: RemoteGroup | null
+  error: string
 }
 
 const missingFirestoreMessage =
@@ -125,6 +138,27 @@ export async function getUserGroupMemberships(userId: string): Promise<UserGroup
   return snapshot.docs.map(mapUserGroupMembership)
 }
 
+export function subscribeRemoteGroup(
+  groupId: string,
+  callback: (state: RemoteGroupState) => void,
+): Unsubscribe {
+  return onSnapshot(
+    doc(requireDb(), 'groups', groupId),
+    (snapshot) => {
+      callback({
+        group: snapshot.exists() ? mapRemoteGroup(snapshot.id, snapshot.data()) : null,
+        error: '',
+      })
+    },
+    (error) => {
+      callback({
+        group: null,
+        error: error.message || 'No se pudo cargar la configuracion del grupo.',
+      })
+    },
+  )
+}
+
 export async function setDefaultGroupId(userId: string, groupId: string): Promise<void> {
   const db = requireDb()
 
@@ -136,6 +170,40 @@ export async function setDefaultGroupId(userId: string, groupId: string): Promis
     },
     { merge: true },
   )
+}
+
+export async function updateRemoteGroupSettings(
+  groupId: string,
+  input: RemoteGroupSettingsInput,
+): Promise<void> {
+  const db = requireDb()
+  const name = input.name.trim()
+
+  if (!name) {
+    throw new Error('Escribe un nombre para el grupo.')
+  }
+
+  if (!isWeekday(input.regularWeekday)) {
+    throw new Error('Selecciona un dia regular valido.')
+  }
+
+  await updateDoc(doc(db, 'groups', groupId), {
+    name,
+    regularWeekday: input.regularWeekday,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+function mapRemoteGroup(id: string, data: DocumentData): RemoteGroup {
+  return {
+    id,
+    name: stringOrUndefined(data.name) ?? 'FollowUpGC',
+    regularWeekday: isWeekday(data.regularWeekday) ? data.regularWeekday : undefined,
+    createdBy: stringOrUndefined(data.createdBy) ?? '',
+    createdAt: stringOrUndefined(data.createdAt) ?? '',
+    updatedAt: stringOrUndefined(data.updatedAt) ?? '',
+    archivedAt: stringOrUndefined(data.archivedAt),
+  }
 }
 
 function mapUserGroupMembership(
@@ -167,4 +235,16 @@ function roleOrUndefined(value: unknown): GroupRole | undefined {
 
 function membershipStatusOrUndefined(value: unknown): GroupMembership['status'] | undefined {
   return value === 'active' || value === 'inactive' ? value : undefined
+}
+
+function isWeekday(value: unknown): value is Weekday {
+  return (
+    value === 0 ||
+    value === 1 ||
+    value === 2 ||
+    value === 3 ||
+    value === 4 ||
+    value === 5 ||
+    value === 6
+  )
 }

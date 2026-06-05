@@ -6,7 +6,7 @@ Phase 4.5 added automated Firestore Security Rules tests before any local
 pastoral data is migrated to Firestore. Phase 5C expanded the suite for
 importRuns, previewRows, public member docs, and private profiles. Phase 5H
 adds remote meetings and attendance coverage. Phase 5I adds pastoral note
-coverage.
+coverage. Phase 5J adds group settings update coverage.
 
 The tests validate that `firestore.rules` protects the remote identity layer:
 
@@ -24,7 +24,7 @@ The tests validate that `firestore.rules` protects the remote identity layer:
 - `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`
 
 These tests do not confirm/import final members, migrate localStorage, or move
-local settings.
+legacy local settings.
 
 ## How To Run
 
@@ -64,12 +64,12 @@ rules-focused runner.
 
 ## Latest Result
 
-Phase 5I validation uses Java 21 and the Firebase emulators.
+Phase 5J validation uses Java 21 and the Firebase emulators.
 
 Latest result:
 
 - `java -version`: OpenJDK 21.0.11.
-- `pnpm test:rules`: 36 tests executed, 36 passed, 0 failed, exit code 0.
+- `pnpm test:rules`: 38 tests executed, 38 passed, 0 failed, exit code 0.
 - `pnpm test:storage-rules`: 4 tests executed, 4 passed, 0 failed, exit code
   0.
 - Firestore and Storage emulators started and shut down correctly.
@@ -112,6 +112,14 @@ Group reads:
 - Active `owner`, `leader`, and `viewer` can read the group.
 - `inactive` members cannot read the group.
 - Users without membership cannot read the group.
+
+Group settings:
+
+- Only active `owner` users can update group settings.
+- `leader`, `viewer`, inactive members, signed-out users, and unaffiliated
+  users cannot update group settings.
+- Group settings updates require the expected shape, non-empty `name`,
+  `regularWeekday` between `0` and `6`, and stable `createdBy`.
 
 Memberships and mirrors:
 
