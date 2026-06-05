@@ -44,8 +44,11 @@
 - Phase 5J is implemented: remote group settings are stored on
   `groups/{groupId}`, and owner users can edit the group name and regular
   meeting weekday from the Parametros form.
-- Next recommended phase: implement owner-managed membership and role
-  administration, including synchronization for user membership mirrors.
+- Phase 5K is implemented: existing remote memberships can be administered by
+  active owners through a callable that synchronizes user membership mirrors
+  and protects the last active owner.
+- Next recommended phase: design invitations/user discovery before creating
+  memberships for users who are not already in the group.
 - Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
   `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
@@ -77,14 +80,15 @@
 - Do not rely on XLSX upload access if `pnpm test:storage-rules` fails.
 - Review viewer access before remote member sync because Firestore rules cannot
   hide individual fields such as `documentId` inside readable documents.
-- Design last-owner protection before advanced role administration. Firestore
-  Rules alone cannot reliably count remaining owners.
-- Extend rules tests when future role administration begins writing to
-  Firestore.
+- Last-owner protection for membership changes now lives in the
+  `updateGroupMembership` callable. Firestore Rules alone still cannot count
+  remaining owners.
+- Extend rules and callable tests when invitation or owner-assignment flows
+  begin writing to Firestore.
 - Keep user membership mirrors synchronized with authoritative group
   memberships.
-- Add owner-managed leader/viewer assignment before inviting or assigning more
-  users to a group.
+- Decide whether assigning additional owners should be supported before
+  broadening role administration beyond leader/viewer.
 - Imported member writes must continue using the Phase 5C member/private
   profile model, backend-generated preview, and explicit confirmation.
 - Add dedicated Cloud Function tests for `confirmChurchXlsxImport`

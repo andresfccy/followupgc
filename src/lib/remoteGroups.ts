@@ -12,6 +12,7 @@ import {
   type QueryDocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore'
+import { httpsCallable } from 'firebase/functions'
 import type { Weekday } from '@/domain/types'
 import { firebaseRuntime } from '@/lib/firebase'
 
@@ -35,6 +36,7 @@ export type GroupMembership = {
   email?: string
   joinedAt: string
   status: 'active' | 'inactive'
+  updatedAt?: string
 }
 
 export type UserGroupMembership = GroupMembership & {
@@ -58,6 +60,17 @@ export type RemoteGroupState = {
   error: string
 }
 
+export type RemoteGroupMembershipsState = {
+  memberships: GroupMembership[]
+  error: string
+}
+
+export type UpdateRemoteMembershipInput = {
+  targetUserId: string
+  role: Exclude<GroupRole, 'owner'>
+  status: GroupMembership['status']
+}
+
 const missingFirestoreMessage =
   'Firestore no esta configurado. Revisa las variables VITE_FIREBASE_* del proyecto Firebase.'
 
@@ -67,6 +80,14 @@ function requireDb() {
   }
 
   return firebaseRuntime.db
+}
+
+function requireFunctions() {
+  if (!firebaseRuntime.functions) {
+    throw new Error(missingFirestoreMessage)
+  }
+
+  return firebaseRuntime.functions
 }
 
 export async function createRemoteGroup(
@@ -159,6 +180,34 @@ export function subscribeRemoteGroup(
   )
 }
 
+export function subscribeRemoteGroupMemberships(
+  groupId: string,
+  callback: (state: RemoteGroupMembershipsState) => void,
+): Unsubscribe {
+  return onSnapshot(
+    collection(requireDb(), 'groups', groupId, 'memberships'),
+    (snapshot) => {
+      callback({
+        memberships: snapshot.docs
+          .map(mapGroupMembership)
+          .sort((first, second) => {
+            const roleOrder = roleSortValue(first.role) - roleSortValue(second.role)
+            if (roleOrder !== 0) return roleOrder
+
+            return membershipLabel(first).localeCompare(membershipLabel(second))
+          }),
+        error: '',
+      })
+    },
+    (error) => {
+      callback({
+        memberships: [],
+        error: error.message || 'No se pudieron cargar las membresias del grupo.',
+      })
+    },
+  )
+}
+
 export async function setDefaultGroupId(userId: string, groupId: string): Promise<void> {
   const db = requireDb()
 
@@ -194,6 +243,42 @@ export async function updateRemoteGroupSettings(
   })
 }
 
+export async function updateRemoteGroupMembership(
+  groupId: string,
+  input: UpdateRemoteMembershipInput,
+): Promise<void> {
+  const targetUserId = input.targetUserId.trim()
+
+  if (!targetUserId) {
+    throw new Error('Selecciona una membresia valida.')
+  }
+
+  if (input.role !== 'leader' && input.role !== 'viewer') {
+    throw new Error('Esta fase solo permite asignar leader o viewer.')
+  }
+
+  if (!membershipStatusOrUndefined(input.status)) {
+    throw new Error('Selecciona un estado valido.')
+  }
+
+  const updateMembership = httpsCallable<
+    {
+      groupId: string
+      targetUserId: string
+      role: Exclude<GroupRole, 'owner'>
+      status: GroupMembership['status']
+    },
+    { updated: true }
+  >(requireFunctions(), 'updateGroupMembership')
+
+  await updateMembership({
+    groupId,
+    targetUserId,
+    role: input.role,
+    status: input.status,
+  })
+}
+
 function mapRemoteGroup(id: string, data: DocumentData): RemoteGroup {
   return {
     id,
@@ -225,6 +310,21 @@ function mapUserGroupMembership(
   }
 }
 
+function mapGroupMembership(snapshot: QueryDocumentSnapshot<DocumentData>): GroupMembership {
+  const data = snapshot.data()
+
+  return {
+    groupId: stringOrUndefined(data.groupId) ?? '',
+    userId: stringOrUndefined(data.userId) ?? snapshot.id,
+    role: roleOrUndefined(data.role) ?? 'viewer',
+    status: membershipStatusOrUndefined(data.status) ?? 'inactive',
+    displayName: stringOrUndefined(data.displayName),
+    email: stringOrUndefined(data.email),
+    joinedAt: stringOrUndefined(data.joinedAt) ?? '',
+    updatedAt: stringOrUndefined(data.updatedAt),
+  }
+}
+
 function stringOrUndefined(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
@@ -235,6 +335,16 @@ function roleOrUndefined(value: unknown): GroupRole | undefined {
 
 function membershipStatusOrUndefined(value: unknown): GroupMembership['status'] | undefined {
   return value === 'active' || value === 'inactive' ? value : undefined
+}
+
+function roleSortValue(role: GroupRole) {
+  if (role === 'owner') return 0
+  if (role === 'leader') return 1
+  return 2
+}
+
+function membershipLabel(membership: GroupMembership) {
+  return membership.displayName || membership.email || membership.userId
 }
 
 function isWeekday(value: unknown): value is Weekday {

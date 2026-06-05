@@ -6,7 +6,8 @@ Phase 4.5 added automated Firestore Security Rules tests before any local
 pastoral data is migrated to Firestore. Phase 5C expanded the suite for
 importRuns, previewRows, public member docs, and private profiles. Phase 5H
 adds remote meetings and attendance coverage. Phase 5I adds pastoral note
-coverage. Phase 5J adds group settings update coverage.
+coverage. Phase 5J adds group settings update coverage. Phase 5K moves
+membership administration after initial group creation to a callable function.
 
 The tests validate that `firestore.rules` protects the remote identity layer:
 
@@ -64,7 +65,7 @@ rules-focused runner.
 
 ## Latest Result
 
-Phase 5J validation uses Java 21 and the Firebase emulators.
+Phase 5K validation uses Java 21 and the Firebase emulators.
 
 Latest result:
 
@@ -127,10 +128,14 @@ Memberships and mirrors:
 - Fake user membership mirrors are denied without an authoritative membership.
 - Mirrors must match the authoritative role and status.
 - Users cannot grant themselves `owner` through a mirror record.
+- Direct client membership updates and deletes are denied after initial group
+  creation. Managed role/status changes use the `updateGroupMembership`
+  callable function.
 
 Critical writes:
 
-- Only `owner` can update membership roles/statuses.
+- Only the callable membership path can update membership roles/statuses after
+  initial group creation.
 - `leader` cannot promote themselves to `owner`.
 - `viewer`, `inactive`, and users without membership cannot write.
 - `owner` and `leader` can write future group data paths currently reserved by
@@ -205,10 +210,9 @@ authorization.
 
 ## Not Covered Or Still Limited
 
-- Last-owner protection is not implemented. Firestore Rules cannot reliably
-  count all remaining owners in a group. This should be handled later with a
-  controlled transactional write path, and may require Cloud Functions or a
-  carefully designed owner-count document.
+- Last-owner protection for managed membership updates is implemented in the
+  `updateGroupMembership` Cloud Function. Firestore Rules still cannot count
+  remaining owners by themselves.
 - Viewer can read public member docs only because full `documentId`, phone,
   birthday, and pastoral notes are excluded from that document. Revisit whether
   `documentIdHash` should remain viewer-readable before broad production use.
@@ -216,10 +220,11 @@ authorization.
   `demo-followupgc-rules` because Storage Rules consult Firestore membership
   documents and both suites must share the same project id.
 - Membership mirrors must remain synchronized with authoritative memberships in
-  `groups/{groupId}/memberships/{uid}`.
+  `groups/{groupId}/memberships/{uid}` through controlled write paths.
 - Rules must be extended and re-tested whenever new remote collections are
   added.
-- Invitation flows and advanced role administration are not implemented.
+- Invitation flows, new user membership creation, and assigning additional
+  owners are not implemented.
 
 ## Relationship To Migration
 

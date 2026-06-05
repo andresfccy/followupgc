@@ -181,10 +181,47 @@ Validation:
 
 Remaining:
 
-- Membership mirrors may still contain stale group names until a later
-  membership/mirror synchronization phase updates them.
-- Implement owner-managed role and membership administration before inviting or
-  assigning additional users to groups.
+- Implement invitations before creating memberships for users who are not
+  already in the group.
+- Decide whether additional owner assignment should be supported.
+
+## 2026-06-05: Phase 5K Remote Membership Administration Implemented
+
+Owner-managed administration for existing remote memberships is implemented.
+
+What changed:
+
+- Added `updateGroupMembership` Cloud Function for managed membership
+  role/status changes.
+- The callable requires an active owner requester, updates the authoritative
+  membership and user mirror together, and protects the last active owner.
+- Direct client membership updates/deletes are denied after initial group
+  creation; group creation can still create the first owner membership and
+  mirror.
+- Extended `src/lib/remoteGroups.ts` with group membership subscription and
+  callable update helpers.
+- Updated `src/App.tsx` with a Parametros membership panel where owners can
+  change existing memberships to `leader` or `viewer` and activate/deactivate
+  them.
+- Added Cloud Function unit tests for membership administration.
+- Updated Firestore Rules tests for the callable-managed membership model.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm functions:lint` passed.
+- `pnpm functions:test` passed: 8 executed, 8 passed, 0 failed.
+- `pnpm test:rules` passed: 38 executed, 38 passed, 0 failed.
+- `pnpm test:storage-rules` passed: 4 executed, 4 passed, 0 failed.
+- `pnpm dev --host 127.0.0.1` responded with HTTP 200.
+
+Remaining:
+
+- This phase does not invite new users or create memberships for users outside
+  the current group.
+- This phase does not assign additional owners; it only preserves existing
+  owners and allows assignment to `leader` or `viewer`.
 
 ## 2026-06-04: Node 22 Runtime Alignment
 

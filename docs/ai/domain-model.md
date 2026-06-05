@@ -30,6 +30,10 @@ Source of truth: `src/domain/types.ts`.
   `groups/{groupId}`. The current settings fields are `name` and
   `regularWeekday`; membership mirrors should not be treated as the canonical
   source for group settings.
+- Remote group memberships are stored under
+  `groups/{groupId}/memberships/{uid}` as the authoritative role/status record.
+  User lookup mirrors live at `users/{uid}/groupMemberships/{groupId}` and must
+  stay synchronized by controlled writes.
 - Weekdays use JavaScript `Date#getDay()` values: `0` Sunday through `6`
   Saturday.
 - Prefer additive fields over renaming stored fields.

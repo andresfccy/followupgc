@@ -59,8 +59,11 @@ import {
 import {
   createRemoteGroup,
   setDefaultGroupId,
+  subscribeRemoteGroupMemberships,
   subscribeRemoteGroup,
+  updateRemoteGroupMembership,
   updateRemoteGroupSettings,
+  type GroupMembership,
   type RemoteGroup,
 } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
@@ -115,6 +118,11 @@ function App() {
     group: RemoteGroup | null
     error: string
   }>({ groupId: '', group: null, error: '' })
+  const [remoteMembershipsState, setRemoteMembershipsState] = useState<{
+    groupId: string
+    memberships: GroupMembership[]
+    error: string
+  }>({ groupId: '', memberships: [], error: '' })
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [editingMeetingId, setEditingMeetingId] = useState('')
@@ -133,6 +141,14 @@ function App() {
     remoteGroupState.groupId === authSession.currentGroupId ? remoteGroupState.error : ''
   const meetingWeekday = remoteGroup?.regularWeekday ?? (5 as Weekday)
   const groupName = remoteGroup?.name ?? authSession.currentMembership?.groupName ?? 'FollowUpGC'
+  const groupMemberships =
+    remoteMembershipsState.groupId === authSession.currentGroupId
+      ? remoteMembershipsState.memberships
+      : []
+  const remoteMembershipsError =
+    remoteMembershipsState.groupId === authSession.currentGroupId
+      ? remoteMembershipsState.error
+      : ''
   const sessions =
     remoteMeetingsState.groupId === authSession.currentGroupId ? remoteMeetingsState.meetings : []
   const remoteMeetingsError =
@@ -227,6 +243,23 @@ function App() {
         error,
       })
     })
+  }, [authSession.currentGroupId])
+
+  useEffect(() => {
+    if (!authSession.currentGroupId) {
+      return undefined
+    }
+
+    return subscribeRemoteGroupMemberships(
+      authSession.currentGroupId,
+      ({ memberships: nextMemberships, error }) => {
+        setRemoteMembershipsState({
+          groupId: authSession.currentGroupId,
+          memberships: nextMemberships,
+          error,
+        })
+      },
+    )
   }, [authSession.currentGroupId])
 
   useEffect(() => {
@@ -623,6 +656,32 @@ function App() {
     }
   }
 
+  async function handleUpdateMembership(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!authSession.currentGroupId || !canManageGroupSettings) {
+      setAuthStatus('Solo owner activo puede administrar membresias.')
+      return
+    }
+
+    const form = new FormData(event.currentTarget)
+    const targetUserId = String(form.get('targetUserId') ?? '')
+    const roleValue = String(form.get('role') ?? '')
+    const statusValue = String(form.get('status') ?? '')
+
+    try {
+      await updateRemoteGroupMembership(authSession.currentGroupId, {
+        targetUserId,
+        role: roleValue === 'leader' ? 'leader' : 'viewer',
+        status: statusValue === 'inactive' ? 'inactive' : 'active',
+      })
+      await authSession.refresh()
+      setAuthStatus('Membresia actualizada en Firebase.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo actualizar membresia.')
+    }
+  }
+
   return (
     <main className="min-h-svh bg-stone-50 text-slate-950">
       <section className="border-b border-slate-200 bg-white">
@@ -975,6 +1034,82 @@ function App() {
               Dia configurado: {getWeekdayLabel(meetingWeekday)}.
               {!canManageGroupSettings ? ' Solo owner activo puede editar parametros.' : ''}
             </p>
+            <div className="mt-5 border-t border-slate-200 pt-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Users size={16} className="text-emerald-700" />
+                <h3 className="text-sm font-semibold text-slate-900">Membresias</h3>
+              </div>
+              {remoteMembershipsError ? (
+                <p className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                  {remoteMembershipsError}
+                </p>
+              ) : null}
+              {groupMemberships.length ? (
+                <div className="grid gap-2">
+                  {groupMemberships.map((membership) => {
+                    const isOwnerMembership = membership.role === 'owner'
+                    const isEditableMembership = canManageGroupSettings && !isOwnerMembership
+
+                    return (
+                      <form
+                        className="grid gap-2 rounded-md border border-slate-200 bg-white p-3"
+                        key={membership.userId}
+                        onSubmit={handleUpdateMembership}
+                      >
+                        <input name="targetUserId" type="hidden" value={membership.userId} />
+                        <div>
+                          <p className="truncate text-sm font-medium text-slate-900">
+                            {membership.displayName || membership.email || membership.userId}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">
+                            {membership.email || membership.userId}
+                          </p>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className="grid gap-1 text-sm font-medium text-slate-700">
+                            Rol
+                            <select
+                              className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
+                              defaultValue={membership.role}
+                              disabled={!isEditableMembership}
+                              name="role"
+                            >
+                              {isOwnerMembership ? <option value="owner">Owner</option> : null}
+                              <option value="leader">Leader</option>
+                              <option value="viewer">Viewer</option>
+                            </select>
+                          </label>
+                          <label className="grid gap-1 text-sm font-medium text-slate-700">
+                            Estado
+                            <select
+                              className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
+                              defaultValue={membership.status}
+                              disabled={!isEditableMembership}
+                              name="status"
+                            >
+                              <option value="active">Activo</option>
+                              <option value="inactive">Inactivo</option>
+                            </select>
+                          </label>
+                        </div>
+                        <button
+                          className="inline-flex h-9 w-fit items-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                          disabled={!isEditableMembership}
+                        >
+                          <Check size={15} /> Guardar membresia
+                        </button>
+                      </form>
+                    )
+                  })}
+                </div>
+              ) : (
+                <EmptyState text="No hay membresias remotas para este grupo." />
+              )}
+              <p className="mt-3 text-sm text-slate-600">
+                Esta fase administra membresias existentes. La invitacion de usuarios nuevos queda
+                para una fase posterior.
+              </p>
+            </div>
           </Panel>
         </aside>
       </div>

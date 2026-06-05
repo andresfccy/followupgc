@@ -253,7 +253,8 @@ service cloud.firestore {
         'displayName',
         'email',
         'joinedAt',
-        'status'
+        'status',
+        'updatedAt'
       ]) &&
       request.resource.data.groupId == groupId &&
       request.resource.data.userId == userId &&
@@ -293,9 +294,9 @@ service cloud.firestore {
       match /groupMemberships/{groupId} {
         allow read: if isSelf(userId);
         allow create, update: if isSignedIn() &&
-          (isSelf(userId) || isOwner(groupId)) &&
+          isSelf(userId) &&
           validUserMembershipMirror(userId, groupId);
-        allow delete: if isSignedIn() && isOwner(groupId);
+        allow delete: if false;
       }
     }
 
@@ -310,18 +311,12 @@ service cloud.firestore {
         allow read: if isSelf(userId) || isActiveMember(groupId);
         allow create: if isSignedIn() &&
           validMembershipDoc(groupId, userId) &&
-          (
-            isOwner(groupId) ||
-            (
-              isSelf(userId) &&
-              request.resource.data.role == 'owner' &&
-              request.resource.data.status == 'active' &&
-              !exists(groupPath(groupId)) &&
-              getAfter(groupPath(groupId)).data.createdBy == request.auth.uid
-            )
-          );
-        allow update: if isOwner(groupId) && validMembershipDoc(groupId, userId);
-        allow delete: if isOwner(groupId);
+          isSelf(userId) &&
+          request.resource.data.role == 'owner' &&
+          request.resource.data.status == 'active' &&
+          !exists(groupPath(groupId)) &&
+          getAfter(groupPath(groupId)).data.createdBy == request.auth.uid;
+        allow update, delete: if false;
       }
 
       match /importRuns/{importRunId} {

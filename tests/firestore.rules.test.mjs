@@ -399,7 +399,7 @@ test('users cannot give themselves owner through a mirror record', async () => {
   )
 })
 
-test('only owners can change membership roles or statuses', async () => {
+test('clients cannot directly change membership roles or statuses after initial group creation', async () => {
   await seedGroup({
     groupId: 'group-a',
     createdBy: 'owner-a',
@@ -411,11 +411,17 @@ test('only owners can change membership roles or statuses', async () => {
     ],
   })
 
-  await assertSucceeds(
+  await assertFails(
     authedDb('owner-a')
       .doc('groups/group-a/memberships/viewer-a')
       .set(validMembership({ groupId: 'group-a', uid: 'viewer-a', role: 'leader' })),
   )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/memberships/new-viewer')
+      .set(validMembership({ groupId: 'group-a', uid: 'new-viewer', role: 'viewer' })),
+  )
+  await assertFails(authedDb('owner-a').doc('groups/group-a/memberships/viewer-a').delete())
   await assertFails(
     authedDb('leader-a')
       .doc('groups/group-a/memberships/leader-a')

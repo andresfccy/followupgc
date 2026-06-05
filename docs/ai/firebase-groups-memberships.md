@@ -2,13 +2,13 @@
 
 ## Scope
 
-Phase 4 adds the first remote multi-group structure for authenticated users.
-It creates remote group identity, memberships, user group lookup records, and
-`defaultGroupId` handling.
+Firebase groups and memberships are the production identity and authorization
+layer for FollowUpGC. They create remote group identity, memberships, user group
+lookup records, `defaultGroupId` handling, and owner-managed role/status
+changes.
 
-It does not migrate local FollowUpGC data. Members, meetings, attendance,
-cancelled meetings, pastoral notes, import data, and local settings still use
-Zustand persist with browser `localStorage`.
+They do not migrate local FollowUpGC data. Legacy localStorage/demo data is
+retired and must not be uploaded to Firestore.
 
 ## Collections
 
@@ -29,6 +29,7 @@ groups/{groupId}/memberships/{userId}
   email?
   joinedAt
   status
+  updatedAt?
 
 users/{userId}
   uid
@@ -73,12 +74,27 @@ uploaded.
 ## Roles
 
 - `owner`: owns group-level administration and can manage memberships.
-- `leader`: reserved for future group data writes such as members, meetings,
-  attendance, and pastoral notes.
-- `viewer`: read-only role for future group data.
+- `leader`: can manage production group data such as members, meetings,
+  attendance, imports, and pastoral notes.
+- `viewer`: read-only role for allowed group data.
 
 A user can have different roles in different groups. A group can have multiple
-leaders.
+leaders and multiple owners.
+
+## Membership Administration
+
+Phase 5K adds owner-managed administration for existing memberships.
+
+- The UI lists `groups/{groupId}/memberships/{uid}` in the Parametros panel.
+- Only active owners can request membership changes.
+- Changes go through the `updateGroupMembership` Cloud Function.
+- The callable updates the authoritative membership and the user's lookup
+  mirror in one transaction.
+- The callable protects the group from losing its last active owner.
+- This phase assigns `leader` or `viewer`; assigning new `owner` users remains
+  out of scope.
+- Invitations and creation of memberships for users who are not already in the
+  group remain out of scope.
 
 ## defaultGroupId
 
@@ -109,7 +125,10 @@ Initial rule intent:
 - Authenticated users can create a group.
 - The creator can create the first owner membership.
 - Active group members can read the group and group memberships.
-- Owners can manage membership records.
+- Direct client writes can create only the first owner membership in the same
+  batch as group creation.
+- Later membership role/status changes go through the `updateGroupMembership`
+  Cloud Function.
 - User membership lookup records must mirror authoritative memberships.
 - Future member/meeting/attendance reads require active membership.
 - Future member/meeting/attendance writes require `owner` or `leader`.
@@ -122,8 +141,9 @@ Known limitations before remote pastoral data is stored:
 - Rules cannot hide individual fields from readable Firestore documents, so
   viewer access to future member documents that include `documentId` still
   needs a sanitized projection or a stricter access decision.
-- Rules do not yet enforce "last owner" protection.
-- Invitations and owner-managed assignment flows are not implemented.
+- Last active owner protection is implemented in the `updateGroupMembership`
+  Cloud Function, not in Firestore Rules.
+- Invitations are not implemented.
 
 ## Manual Test
 
@@ -141,30 +161,24 @@ Known limitations before remote pastoral data is stored:
 10. Confirm `users/{uid}.defaultGroupId` is set when the user had none.
 11. Sign out and sign in again.
 12. Confirm the default group loads when its membership remains active.
-13. Confirm members, meetings, attendance, notes, imports, and document ids
-    remain only in localStorage.
+13. As owner, change an existing membership to `leader` or `viewer`.
+14. Confirm Firestore updates both `groups/{groupId}/memberships/{uid}` and
+    `users/{uid}/groupMemberships/{groupId}`.
+15. Confirm the UI does not allow direct localStorage/demo persistence.
 
 ## Out Of Scope
 
 - LocalStorage to Firestore migration.
-- Remote sync for members, meetings, attendance, cancelled meetings, or notes.
-- Real XLSX import.
-- Firebase Storage.
-- Cloud Functions.
 - Invitations and email delivery.
-- Advanced role administration UI.
-- Final exhaustive Firestore rules for all future collections.
+- Assigning additional owners.
+- Creating memberships for users who are not already in the group.
+- Final exhaustive Firestore rules for future collections.
 - Analytics.
 
 ## Next Steps
 
-- Add emulator-backed Firestore rule tests before storing real pastoral data.
-- Design owner-managed leader/viewer assignment.
-- Use the official church Excel file as the first real production data source:
-  parser/normalization, mandatory preview, explicit confirmation, and
-  controlled Firestore writes.
-- Treat localStorage to Firestore migration as deferred/optional. Revisit only
-  if users have real local data to preserve; do not migrate seeds, demo data,
-  local development data, or local test data.
-- Decide viewer access and sanitized member projections before uploading member
-  records.
+- Design invitations and user discovery before creating memberships for users
+  who are not already in the group.
+- Decide whether owner assignment should be supported and what extra audit or
+  confirmation it requires.
+- Keep mirror synchronization in controlled write paths.
