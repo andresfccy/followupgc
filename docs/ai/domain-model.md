@@ -12,10 +12,6 @@ data.
 - `TimelineEntry`: a chronological pastoral note for one member.
 - `GroupSettings`: group-level settings, currently `meetingWeekday` and
   `groupName`.
-- `GroupData`: persisted root object.
-- `ChurchMemberImportRow`: normalized member row imported from the church
-  system. It requires `documentId`.
-- `ImportPreview` and `ImportResult`: import validation and commit contracts.
 
 Source of truth: `src/domain/types.ts`.
 
@@ -30,19 +26,17 @@ Source of truth: `src/domain/types.ts`.
 - Prefer additive fields over renaming stored fields.
 - `Member.joinedAt` is the canonical domain field for "En Grupo Desde".
 - Imported Excel member fields are member data, not temporary metadata.
-- Existing members may lack `documentId`; imported rows may not.
-- Reimports upsert by `documentId` and must preserve local pastoral and
-  operational data.
+- Full document ids belong only in private Firestore member profile documents.
+- Reimports upsert by document identity in the backend import pipeline.
 
 ## Church Member Import Mapping
 
-- `Nombre` -> `ChurchMemberImportRow.firstName` -> `Member.firstName`
-- `Apellidos` -> `ChurchMemberImportRow.lastName` -> `Member.lastName`
+- `Nombre` -> `Member.firstName`
+- `Apellidos` -> `Member.lastName`
 - `Documento` -> `documentId`
 - `Genero` / `Género` -> `gender`
 - `Cumpleaños` (`MM/dd`) -> `birthday` (`MM-dd`)
-- `En Grupo Desde` -> `ChurchMemberImportRow.joinedGroupAt` ->
-  `Member.joinedAt`
+- `En Grupo Desde` -> `Member.joinedAt`
 - `Rol en Grupo` -> `groupRole`
 - `Asistencias Semestre` -> `semesterAttendances`
 - `Servidor` (`Si`/`No`) -> `isServer`
@@ -50,12 +44,6 @@ Source of truth: `src/domain/types.ts`.
 
 ## Persistence Impact
 
-Any change to `GroupData` may affect existing `localStorage` data. Before
-changing stored shapes, read `docs/ai/data-persistence.md` and decide whether a
-Zustand persist migration is needed.
-
-## Seed Data
-
-Update `src/domain/seed.ts` only when a new domain concept needs a visible
-example for development or manual QA. Keep seed data realistic and pastoral,
-not corporate.
+Any durable domain change should be reflected in Firebase repository functions,
+Firestore/Storage rules, and emulator tests. Legacy localStorage data is not
+migrated.

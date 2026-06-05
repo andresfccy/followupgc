@@ -2,59 +2,48 @@
 
 ## Current Policy
 
-The app persists all data locally through Zustand persist into browser
-`localStorage`. The current storage key is `followupgc-data`, and the persist
-version is `2`.
+Firebase is the intended durable persistence layer for production use.
+The legacy Zustand/localStorage store has been removed from the production app.
+Browser `localStorage` under `followupgc-data` belongs to the retired
+local/demo phase and must not be treated as production data.
 
-Persistence owner: `src/store/groupStore.ts`.
+Production persistence owners should be repository-style Firebase modules under
+`src/lib/`, such as remote group, import, and member repositories.
 
 ## Mutation Rules
 
-- Add or update persistent mutations only in `src/store/groupStore.ts`.
-- Components should call store actions instead of editing storage directly.
+- Add or update durable production mutations through Firebase repository-style
+  functions.
+- Components should call repository functions instead of editing Firebase or
+  storage directly.
 - Do not write to `localStorage` from `src/App.tsx` or feature components.
-- Do not introduce API clients, server state libraries, or sync services unless
-  explicitly requested.
+- Do not use `followupgc-data` as a production source or migrate it to
+  Firestore.
 
 ## Stored Shape Changes
 
-Before changing `GroupData` or nested persisted records:
+Before changing durable Firestore/Storage records:
 
 1. Read `src/domain/types.ts`.
-2. Check current seed data in `src/domain/seed.ts`.
-3. Decide if old stored data can still load.
-4. If not, add a Zustand persist migration and document it here.
-5. Bump the persist version only with a real migration.
+2. Check the repository module that owns the collection.
+3. Update Firestore or Storage rules when permissions or shapes change.
+4. Extend emulator tests before enabling production writes.
+5. Document the persistence impact in the roadmap/handoff.
 
 ## Current Migration Notes
 
-Version `2` normalizes existing members so older localStorage records receive:
+There is no localStorage-to-Firestore migration path. The Firebase-only app
+starts from Firestore data, primarily official Excel imports and future remote
+write flows.
 
-- `firstName`
-- `lastName`
-- `createdAt`
-- `updatedAt`
-
-New imported member fields remain optional for existing members. Import rows
-require `documentId`, but already persisted members without a document remain
-valid.
-
-The member import action upserts by `documentId` and updates only fields from
-the church system. It preserves local FollowUpGC fields such as `id`, `status`,
-`phone`, `notes`, timeline entries, sessions, and attendance records.
-
-## Future Backend Rule
-
-If remote persistence is requested later, keep local-first behavior available.
-Move persistence behind repository-style functions instead of spreading API
-calls through UI components.
+## Firebase-Only Transition
 
 Current production import decision:
 
-- localStorage is not the source for the first real production dataset.
-- localStorage remains valid as local/demo/fallback mode.
-- Do not automatically migrate localStorage to Firestore.
-- Do not migrate seeds, demo data, local development data, or local test data.
-- The first real production load should come from the official church Excel
-  file through parser/normalization, mandatory preview, explicit confirmation,
-  and controlled Firestore writes.
+- Firebase is the durable production persistence layer.
+- The first real production dataset comes from the official church Excel file
+  through parser/normalization, mandatory preview, explicit confirmation, and
+  controlled Firestore writes.
+- Existing `followupgc-data` should be cleared or ignored during the transition.
+- Do not migrate seeds, demo data, local development data, local test data, or
+  browser localStorage contents to Firestore.

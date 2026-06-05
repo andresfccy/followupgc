@@ -3,16 +3,21 @@
 ## Current Shape
 
 FollowUpGC is a single-screen React app. `src/main.tsx` mounts `src/App.tsx`.
-`App.tsx` reads from the Zustand store, renders the dashboard, owns local form
-state, and calls store actions for persistent mutations.
+`App.tsx` reads Firebase-backed repository modules, renders the dashboard, and
+owns temporary form and selection state.
 
-There is no backend, router tree, server state layer, or API client.
+Firebase Auth, Firestore, Storage, and Cloud Functions are the production
+persistence/runtime backend. There is no router tree or separate server state
+library.
 
 ## Boundaries
 
-- `src/domain/types.ts`: stable domain vocabulary and stored data contract.
-- `src/domain/seed.ts`: initial local sample data.
-- `src/store/groupStore.ts`: Zustand store, persistence key, and all mutations.
+- `src/domain/types.ts`: stable domain vocabulary.
+- `src/lib/remoteGroups.ts`: Firestore group and membership repository.
+- `src/lib/remoteImports.ts`: Storage/importRun/callable import repository.
+- `src/lib/remoteMembers.ts`: Firestore remote member read repository.
+- `src/lib/legacyLocalStorage.ts`: one-way cleanup for the retired
+  `followupgc-data` key.
 - `src/lib/date.ts`: date formatting, weekday labels, next meeting calculation.
 - `src/lib/utils.ts`: generic frontend helpers such as class merging and ids.
 - `src/App.tsx`: current screen composition and task-specific helper
@@ -20,9 +25,9 @@ There is no backend, router tree, server state layer, or API client.
 
 ## Dependency Direction
 
-UI may import store, domain types, and libs. The store may import domain types,
-seed data, and generic utils. Domain files should not import UI or store code.
-Date helpers may import domain types but must not import the store.
+UI may import repository modules, domain types, and libs. Domain files should
+not import UI or repository code. Date helpers may import domain types but must
+not import Firebase repositories.
 
 ## Change Strategy
 
@@ -31,11 +36,11 @@ Date helpers may import domain types but must not import the store.
 - When splitting, prefer feature folders such as `src/features/members` or
   `src/features/sessions` over global abstractions.
 - Add shared abstractions only after at least two real call sites need them.
-- Keep local-first behavior intact while improving structure.
+- Keep Firebase-only production persistence intact while improving structure.
 
 ## Current Constraints
 
 - TanStack Router is available but intentionally unused.
-- Zod is available but validation is not wired yet.
-- Persisted data version is `1` under the key `followupgc-data`.
-- No migration system exists yet.
+- Zustand/localStorage persistence has been retired from the production app.
+- Legacy `followupgc-data` is cleared on startup and must not be migrated to
+  Firestore.

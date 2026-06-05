@@ -1,12 +1,10 @@
 # Security And Privacy
 
-FollowUpGC stores pastoral information. Treat the data as private even though
-the current app is local-only.
+FollowUpGC stores pastoral information. Treat the data as private in Firebase
+and in any temporary browser state.
 
 ## Current Data Boundary
 
-- Pastoral app data still primarily lives in the user's browser
-  `localStorage`.
 - Firebase Auth identifies users.
 - Firestore stores minimal user profiles, remote groups, memberships,
   `defaultGroupId`, importRun preview metadata, and imported remote member
@@ -15,6 +13,8 @@ the current app is local-only.
   current import phase.
 - Cloud Functions processes XLSX files to generate preview data and confirms
   final imported-member writes after owner/leader approval.
+- Legacy `followupgc-data` localStorage data belongs to the retired local/demo
+  phase and must be cleared or ignored, not uploaded to Firestore.
 - Analytics and remote logging of sensitive content remain out of scope.
 
 ## Rules
@@ -45,6 +45,5 @@ the current app is local-only.
 
 ## Future Remote Features
 
-If cloud sync or backend persistence is explicitly requested later, document the
-privacy model first. The default assumption should remain local-first with clear
-user control.
+For each new remote collection, document the privacy model first and extend
+Firestore/Storage rules tests before production writes.

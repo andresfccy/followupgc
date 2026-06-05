@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   CalendarCheck,
   CalendarX2,
@@ -16,10 +16,9 @@ import {
 } from 'lucide-react'
 import type {
   AttendanceStatus,
-  Member,
+  AttendanceRecord,
+  GroupSession,
   MemberStatus,
-  SessionStatus,
-  TimelineEntryType,
   Weekday,
 } from '@/domain/types'
 import { formatDate, getWeekdayLabel, nextMeetingDate, weekdayOptions } from '@/lib/date'
@@ -37,10 +36,14 @@ import {
   type ExcelImportPreviewRow,
   type ExcelImportRun,
 } from '@/lib/remoteImports'
+import {
+  subscribeRemoteMembers,
+  type RemoteMember,
+} from '@/lib/remoteMembers'
 import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
+import { clearLegacyGroupStorage } from '@/lib/legacyLocalStorage'
 import { cn } from '@/lib/utils'
-import { useGroupStore } from '@/store/groupStore'
 
 const attendanceLabels: Record<AttendanceStatus, string> = {
   present: 'Presente',
@@ -54,30 +57,20 @@ const memberStatusLabels: Record<MemberStatus, string> = {
   inactive: 'Inactivo',
 }
 
-const timelineTypeLabels: Record<TimelineEntryType, string> = {
-  note: 'Nota',
-  prayer: 'Oracion',
-  care: 'Cuidado',
-  milestone: 'Hito',
-}
+const emptySessions: GroupSession[] = []
+const emptyAttendances: AttendanceRecord[] = []
 
 function App() {
   const authSession = useAuthSession()
-  const {
-    settings,
-    members,
-    sessions,
-    attendances,
-    addMember,
-    addSession,
-    addTimelineEntry,
-    setAttendance,
-    updateMeetingWeekday,
-  } = useGroupStore()
-  const [selectedMemberId, setSelectedMemberId] = useState(members[0]?.id ?? '')
-  const [selectedSessionId, setSelectedSessionId] = useState(sessions[0]?.id ?? '')
+  const [remoteMembersState, setRemoteMembersState] = useState<{
+    groupId: string
+    members: RemoteMember[]
+    error: string
+  }>({ groupId: '', members: [], error: '' })
+  const [selectedMemberId, setSelectedMemberId] = useState('')
+  const [selectedSessionId, setSelectedSessionId] = useState('')
   const [importStatus, setImportStatus] = useState(
-    'El Excel oficial se sube a Firebase Storage y se procesa en backend. Esta fase solo genera preview.',
+    'El Excel oficial se sube a Firebase Storage y se procesa en backend antes de escribir en Firestore.',
   )
   const [activeImportRunId, setActiveImportRunId] = useState('')
   const [activeImportRun, setActiveImportRun] = useState<ExcelImportRun | null>(null)
@@ -85,8 +78,22 @@ function App() {
   const [isImportReviewOpen, setIsImportReviewOpen] = useState(false)
   const [isConfirmingImport, setIsConfirmingImport] = useState(false)
   const [authStatus, setAuthStatus] = useState('')
+  const meetingWeekday = 5 as Weekday
+  const groupName = authSession.currentMembership?.groupName ?? 'FollowUpGC'
+  const sessions = emptySessions
+  const attendances = emptyAttendances
+  const members =
+    remoteMembersState.groupId === authSession.currentGroupId ? remoteMembersState.members : []
+  const remoteMembersError =
+    remoteMembersState.groupId === authSession.currentGroupId ? remoteMembersState.error : ''
+  const isLoadingMembers = Boolean(
+    authSession.currentGroupId && remoteMembersState.groupId !== authSession.currentGroupId,
+  )
+  const effectiveSelectedMemberId = members.some((member) => member.id === selectedMemberId)
+    ? selectedMemberId
+    : members[0]?.id ?? ''
 
-  const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0]
+  const selectedMember = members.find((member) => member.id === effectiveSelectedMemberId)
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? sessions[0]
 
@@ -96,13 +103,28 @@ function App() {
     ? Math.round((presentCount / (heldSessions.length * Math.max(members.length, 1))) * 100)
     : 0
 
-  const sortedSessions = useMemo(
-    () => [...sessions].sort((a, b) => b.date.localeCompare(a.date)),
-    [sessions],
-  )
+  const sortedSessions = sessions
   const visibleImportRun =
     activeImportRun?.groupId === authSession.currentGroupId ? activeImportRun : null
   const visibleImportRows = visibleImportRun ? activeImportRows : []
+
+  useEffect(() => {
+    clearLegacyGroupStorage()
+  }, [])
+
+  useEffect(() => {
+    if (!authSession.currentGroupId) {
+      return undefined
+    }
+
+    return subscribeRemoteMembers(authSession.currentGroupId, ({ members: nextMembers, error }) => {
+      setRemoteMembersState({
+        groupId: authSession.currentGroupId,
+        members: nextMembers,
+        error,
+      })
+    })
+  }, [authSession.currentGroupId])
 
   useEffect(() => {
     if (!authSession.currentGroupId || !activeImportRunId) {
@@ -117,50 +139,19 @@ function App() {
 
   function handleAddMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const fullName = String(form.get('fullName') ?? '').trim()
-    if (!fullName) return
-
-    addMember({
-      fullName,
-      phone: String(form.get('phone') ?? '').trim(),
-      joinedAt: String(form.get('joinedAt') ?? new Date().toISOString().slice(0, 10)),
-      status: String(form.get('status')) as MemberStatus,
-      notes: String(form.get('notes') ?? '').trim(),
-    })
-    event.currentTarget.reset()
+    setImportStatus(
+      'La creacion manual de miembros se habilitara con escritura remota en Firestore. Usa el Excel oficial por ahora.',
+    )
   }
 
   function handleAddSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const date = String(form.get('date') ?? '').trim()
-    if (!date) return
-
-    addSession({
-      date,
-      title: String(form.get('title') ?? 'Grupo en casa').trim() || 'Grupo en casa',
-      status: String(form.get('status')) as SessionStatus,
-      comment: String(form.get('comment') ?? '').trim(),
-    })
-    event.currentTarget.reset()
+    setAuthStatus('Las reuniones se registraran cuando la persistencia remota de reuniones este lista.')
   }
 
   function handleAddTimelineEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedMember) return
-
-    const form = new FormData(event.currentTarget)
-    const body = String(form.get('body') ?? '').trim()
-    if (!body) return
-
-    addTimelineEntry({
-      memberId: selectedMember.id,
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
-      type: String(form.get('type')) as TimelineEntryType,
-      body,
-    })
-    event.currentTarget.reset()
+    setAuthStatus('La bitacora pastoral se escribira cuando el modulo remoto de notas este listo.')
   }
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -263,7 +254,7 @@ function App() {
 
     try {
       await signOutCurrentUser()
-      setAuthStatus('Sesion cerrada. El modo local sigue disponible.')
+      setAuthStatus('Sesion cerrada. Inicia sesion para usar la persistencia en Firebase.')
     } catch (error) {
       setAuthStatus(error instanceof Error ? error.message : 'No se pudo cerrar sesion.')
     }
@@ -283,7 +274,7 @@ function App() {
     try {
       const membership = await createRemoteGroup(authSession.user, {
         name,
-        regularWeekday: settings.meetingWeekday,
+        regularWeekday: meetingWeekday,
         makeDefault: !authSession.defaultGroupId,
       })
 
@@ -337,24 +328,24 @@ function App() {
             <div>
               <p className="text-sm font-medium text-emerald-700">Seguimiento pastoral</p>
               <h1 className="mt-1 text-3xl font-semibold tracking-normal text-slate-950">
-                {settings.groupName}
+                {groupName}
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Registro local de asistencia semanal, grupos no realizados y bitacora
-                cronologica por persona.
+                Registro pastoral con persistencia en Firebase para miembros, importaciones y
+                proximas fases remotas.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Metric icon={Users} label="Personas" value={members.length.toString()} />
               <Metric icon={CalendarCheck} label="Reuniones" value={heldSessions.length.toString()} />
               <Metric icon={Check} label="Asistencia" value={`${attendanceRate}%`} />
-              <Metric icon={Clock3} label="Proxima" value={formatDate(nextMeetingDate(settings.meetingWeekday))} />
+              <Metric icon={Clock3} label="Proxima" value={formatDate(nextMeetingDate(meetingWeekday))} />
             </div>
           </div>
           <AuthPanel
             authSession={authSession}
             authStatus={authStatus}
-            localGroupName={settings.groupName}
+            localGroupName={groupName}
             onEmailAuth={handleEmailAuth}
             onCreateRemoteGroup={handleCreateRemoteGroup}
             onGoogleSignIn={handleGoogleSignIn}
@@ -410,25 +401,14 @@ function App() {
               />
             </div>
 
-            <div className="mt-4 grid gap-2">
-              {members.map((member) => (
-                <button
-                  key={member.id}
-                  className={cn(
-                    'grid gap-1 rounded-md border p-3 text-left transition hover:border-emerald-500',
-                    selectedMember?.id === member.id
-                      ? 'border-emerald-600 bg-emerald-50'
-                      : 'border-slate-200 bg-white',
-                  )}
-                  onClick={() => setSelectedMemberId(member.id)}
-                >
-                  <span className="font-medium text-slate-950">{member.fullName}</span>
-                  <span className="text-sm text-slate-600">
-                    {memberStatusLabels[member.status]} · Desde {formatDate(member.joinedAt)}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <RemoteMembersList
+              authSession={authSession}
+              error={remoteMembersError}
+              isLoading={isLoadingMembers}
+              members={members}
+              onSelectMember={setSelectedMemberId}
+              selectedMemberId={selectedMember?.id ?? ''}
+            />
           </Panel>
 
           <Panel title="Programacion y asistencias" icon={CalendarCheck}>
@@ -451,6 +431,9 @@ function App() {
             </form>
 
             <div className="mt-4 grid gap-3">
+              {!sortedSessions.length ? (
+                <EmptyState text="Las reuniones remotas se habilitaran despues de estabilizar miembros en Firestore." />
+              ) : null}
               {sortedSessions.map((session) => (
                 <button
                   key={session.id}
@@ -510,7 +493,9 @@ function App() {
                                   : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-500',
                               )}
                               onClick={() =>
-                                setAttendance(selectedSession.id, member.id, status, attendance?.comment)
+                                setAuthStatus(
+                                  'La asistencia se escribira cuando el modulo remoto de reuniones este listo.',
+                                )
                               }
                             >
                               {attendanceLabels[status]}
@@ -560,9 +545,9 @@ function App() {
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               Dia regular de reunion
               <select
-                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950"
-                value={settings.meetingWeekday}
-                onChange={(event) => updateMeetingWeekday(Number(event.target.value) as Weekday)}
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 disabled:bg-slate-100 disabled:text-slate-500"
+                disabled
+                value={meetingWeekday}
               >
                 {weekdayOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -572,8 +557,8 @@ function App() {
               </select>
             </label>
             <p className="mt-3 text-sm text-slate-600">
-              Dia configurado: {getWeekdayLabel(settings.meetingWeekday)}. Las excepciones de
-              programacion se registran como fechas no realizadas.
+              Dia configurado: {getWeekdayLabel(meetingWeekday)}. La edicion remota de parametros
+              se habilitara en una fase posterior.
             </p>
           </Panel>
         </aside>
@@ -588,6 +573,70 @@ function App() {
         />
       ) : null}
     </main>
+  )
+}
+
+function RemoteMembersList({
+  authSession,
+  error,
+  isLoading,
+  members,
+  onSelectMember,
+  selectedMemberId,
+}: {
+  authSession: AuthSession
+  error: string
+  isLoading: boolean
+  members: RemoteMember[]
+  onSelectMember: (memberId: string) => void
+  selectedMemberId: string
+}) {
+  if (!authSession.isConfigured) {
+    return <EmptyState text="Configura Firebase para cargar miembros remotos." />
+  }
+
+  if (!authSession.user) {
+    return <EmptyState text="Inicia sesion para cargar miembros desde Firebase." />
+  }
+
+  if (!authSession.currentGroupId) {
+    return <EmptyState text="Selecciona o crea un grupo remoto para ver sus miembros." />
+  }
+
+  if (isLoading) {
+    return <EmptyState text="Cargando miembros desde Firestore..." />
+  }
+
+  if (error) {
+    return <EmptyState text={error} />
+  }
+
+  if (!members.length) {
+    return <EmptyState text="Este grupo remoto aun no tiene miembros. Sube el Excel oficial para importar." />
+  }
+
+  return (
+    <div className="mt-4 grid gap-2">
+      {members.map((member) => (
+        <button
+          key={member.id}
+          className={cn(
+            'grid gap-1 rounded-md border p-3 text-left transition hover:border-emerald-500',
+            selectedMemberId === member.id
+              ? 'border-emerald-600 bg-emerald-50'
+              : 'border-slate-200 bg-white',
+          )}
+          onClick={() => onSelectMember(member.id)}
+          type="button"
+        >
+          <span className="font-medium text-slate-950">{member.fullName}</span>
+          <span className="text-sm text-slate-600">
+            {memberStatusLabels[member.status]}
+            {member.joinedAt ? ` · Desde ${formatDate(member.joinedAt)}` : ''}
+          </span>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -620,8 +669,7 @@ function AuthPanel({
         <div>
           <p className="text-sm font-semibold text-slate-950">Sesion Firebase</p>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            La autenticacion prepara perfil y grupo remoto. Los miembros y reuniones siguen
-            guardados localmente por ahora.
+            Inicia sesion para cargar el grupo remoto y persistir datos en Firebase.
           </p>
           {!authSession.isConfigured ? (
             <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -670,11 +718,11 @@ function AuthPanel({
             </div>
             <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
               <p className="text-sm font-medium text-slate-950">
-                Los miembros y reuniones siguen guardados localmente por ahora
+                Persistencia remota activa por grupo
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                Esta fase solo crea identidad remota de grupo y memberships. No sube bitacoras,
-                asistencias ni documentos.
+                Los miembros importados se leen desde Firestore. Reuniones, asistencias y
+                bitacoras se habilitaran cuando sus colecciones remotas esten listas.
               </p>
             </div>
             {activeMemberships.length ? (
@@ -1092,11 +1140,13 @@ function Panel({
 }
 
 function Field({
+  defaultValue,
   label,
   name,
   placeholder,
   type = 'text',
 }: {
+  defaultValue?: string
   label: string
   name: string
   placeholder?: string
@@ -1107,6 +1157,7 @@ function Field({
       {label}
       <input
         className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950 outline-none focus:border-emerald-600"
+        defaultValue={defaultValue}
         name={name}
         placeholder={placeholder}
         type={type}
@@ -1115,11 +1166,9 @@ function Field({
   )
 }
 
-function MemberSummary({ member }: { member: Member }) {
+function MemberSummary({ member }: { member: RemoteMember }) {
   const administrativeFields = [
-    member.documentId ? ['Documento', maskDocumentId(member.documentId)] : null,
     member.gender ? ['Genero', member.gender] : null,
-    member.birthday ? ['Cumpleanos', member.birthday.replace('-', '/')] : null,
     member.groupRole ? ['Rol en grupo', member.groupRole] : null,
     typeof member.semesterAttendances === 'number'
       ? ['Asistencias semestre', member.semesterAttendances.toString()]
@@ -1134,7 +1183,8 @@ function MemberSummary({ member }: { member: Member }) {
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
       <p className="font-medium text-slate-950">{member.fullName}</p>
       <p className="mt-1 text-sm text-slate-600">
-        {memberStatusLabels[member.status]} · Desde {formatDate(member.joinedAt)}
+        {memberStatusLabels[member.status]}
+        {member.joinedAt ? ` · Desde ${formatDate(member.joinedAt)}` : ''}
       </p>
       {administrativeFields.length ? (
         <dl className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1146,40 +1196,14 @@ function MemberSummary({ member }: { member: Member }) {
           ))}
         </dl>
       ) : null}
-      {member.notes ? <p className="mt-2 text-sm text-slate-600">{member.notes}</p> : null}
     </div>
   )
 }
 
-function maskDocumentId(documentId: string) {
-  if (documentId.length <= 4) return documentId
-
-  return `${'*'.repeat(Math.max(documentId.length - 4, 0))}${documentId.slice(-4)}`
-}
-
 function Timeline({ memberId }: { memberId: string }) {
-  const timeline = useGroupStore((state) => state.timeline)
-  const entries = [...timeline]
-    .filter((entry) => entry.memberId === memberId)
-    .sort((a, b) => b.date.localeCompare(a.date))
+  void memberId
 
-  if (!entries.length) return <EmptyState text="Aun no hay comentarios para esta persona." />
-
-  return (
-    <ol className="grid gap-3">
-      {entries.map((entry) => (
-        <li key={entry.id} className="rounded-md border border-slate-200 bg-white p-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-slate-950">
-              {timelineTypeLabels[entry.type]}
-            </span>
-            <time className="text-xs text-slate-500">{formatDate(entry.date)}</time>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-700">{entry.body}</p>
-        </li>
-      ))}
-    </ol>
-  )
+  return <EmptyState text="La bitacora remota se habilitara en una fase posterior." />
 }
 
 function EmptyState({ text }: { text: string }) {

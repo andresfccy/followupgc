@@ -2,9 +2,9 @@
 
 ## Mission
 
-FollowUpGC is a local-first React app for tracking church cell-group members,
-weekly meetings, attendance, cancelled meetings, and chronological pastoral
-notes. Keep it private, offline-friendly, simple, and easy to maintain.
+FollowUpGC is a Firebase-backed React app for tracking church cell-group
+members, weekly meetings, attendance, cancelled meetings, and chronological
+pastoral notes. Keep it private, simple, and easy to maintain.
 
 ## Start Here
 
@@ -18,7 +18,7 @@ Then load only the task-specific docs:
 
 - Components/UI: `docs/ai/component-graph.md`, `docs/ai/ui-guidelines.md`
 - Domain/data shape: `docs/ai/domain-model.md`
-- Zustand/localStorage: `docs/ai/data-persistence.md`
+- Firebase persistence: `docs/ai/data-persistence.md`
 - Forms/validation: `docs/ai/testing-strategy.md`
 - Routing: `docs/ai/routing-strategy.md`
 - Accessibility: `docs/ai/accessibility.md`
@@ -61,8 +61,7 @@ Use this decision rule:
 ## Ownership Boundaries
 
 - Domain vocabulary lives in `src/domain/types.ts`.
-- Seed examples live in `src/domain/seed.ts`.
-- Persistent mutations live in `src/store/groupStore.ts`.
+- Durable persistence lives behind Firebase repository modules in `src/lib/`.
 - Date and weekday logic lives in `src/lib/date.ts`.
 - Generic utilities only live in `src/lib/utils.ts`.
 - Keep `src/App.tsx` single-screen until route-level complexity is justified.
@@ -71,7 +70,8 @@ Use this decision rule:
 
 - Do not add backend services, auth, cloud sync, analytics, or complex routing
   unless the task explicitly asks for it.
-- Do not replace Zustand, Tailwind, or localStorage.
+- Do not reintroduce Zustand/localStorage as durable production persistence.
+- Do not replace Tailwind.
 - Do not introduce new dependencies without explicit need and approval.
 - Do not rename domain concepts casually.
 - Prefer explicit TypeScript types. Do not weaken types or introduce `any`

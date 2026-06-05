@@ -7,8 +7,9 @@ matters, but the deeper product value is a pastoral record: who came, who
 missed, why a meeting did not happen, and what has happened in each person's
 process.
 
-The app is intentionally local-first. It should remain useful without accounts,
-servers, sync, analytics, or network availability.
+The app now uses Firebase as the production persistence layer. It should remain
+private, simple, and maintainable, but production data depends on Firebase Auth,
+Firestore, Storage, and Cloud Functions.
 
 ## Current Scope
 
@@ -21,9 +22,6 @@ servers, sync, analytics, or network availability.
 
 Out of scope unless explicitly requested:
 
-- Backend persistence.
-- Authentication.
-- Cloud sync.
 - Analytics or tracking.
 - Multi-page routing complexity.
 
@@ -31,10 +29,9 @@ Out of scope unless explicitly requested:
 
 - Vite + React + TypeScript.
 - Tailwind CSS v4 through `@tailwindcss/vite`.
-- Zustand with persist for browser `localStorage`.
+- Firebase Auth, Firestore, Storage, and Cloud Functions.
 - date-fns for date formatting and weekday calculations.
 - lucide-react for icons.
-- Zod is installed for future form validation.
 - TanStack Router is installed but not wired.
 
 ## Product Decisions
@@ -47,6 +44,8 @@ Out of scope unless explicitly requested:
 - Pastoral notes are captured from the selected member.
 - The first UI is a dense operations screen, not a landing page, because this is
   a repeated-use admin tool.
+- Legacy localStorage/demo data is not production data and must not be migrated
+  to Firestore.
 
 ## Verification Expectations
 

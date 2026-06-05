@@ -28,45 +28,6 @@ export type Member = {
   updatedAt: string
 }
 
-export type ChurchMemberImportRow = {
-  firstName: string
-  lastName: string
-  documentId: string
-  gender?: MemberGender
-  birthday?: string
-  joinedGroupAt?: string
-  groupRole?: string
-  semesterAttendances?: number
-  isServer?: boolean
-  isServing?: boolean
-}
-
-export type ImportValidationError = {
-  rowNumber: number
-  field?: string
-  message: string
-  severity: 'error' | 'warning'
-}
-
-export type ImportPreview = {
-  validRows: ChurchMemberImportRow[]
-  errors: ImportValidationError[]
-  summary: {
-    totalRows: number
-    validRows: number
-    invalidRows: number
-    createCount: number
-    updateCount: number
-  }
-}
-
-export type ImportResult = {
-  created: number
-  updated: number
-  skipped: number
-  errors: ImportValidationError[]
-}
-
 export type GroupSession = {
   id: string
   date: string
