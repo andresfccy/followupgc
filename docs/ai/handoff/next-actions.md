@@ -38,8 +38,11 @@
 - Phase 5H is implemented: remote attendance is stored under
   `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`, and
   owner/leader users can mark present, absent, or excused from the UI.
-- Next recommended phase: implement remote pastoral notes under member
-  subcollections before re-enabling the bitacora form.
+- Phase 5I is implemented: remote pastoral notes are stored under
+  `groups/{groupId}/members/{memberId}/pastoralNotes/{noteId}`, and
+  owner/leader users can add notes from the bitacora UI.
+- Next recommended phase: implement remote group settings before re-enabling
+  the parametros form.
 - Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
   `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
@@ -62,7 +65,7 @@
   initial Firestore rules.
 - Firebase Phase 4.5 now has Firestore Rules tests in
   `tests/firestore.rules.test.mjs` and a `pnpm test:rules` script.
-- `pnpm test:rules` passed locally with Java 21: 33 executed, 33 passed,
+- `pnpm test:rules` passed locally with Java 21: 36 executed, 36 passed,
   0 failed, exit code 0.
 - `pnpm test:storage-rules` passed locally with Java 21: 4 executed, 4 passed,
   0 failed, exit code 0.
@@ -73,8 +76,8 @@
   hide individual fields such as `documentId` inside readable documents.
 - Design last-owner protection before advanced role administration. Firestore
   Rules alone cannot reliably count remaining owners.
-- Extend rules tests when `members`, `meetings`, `attendance`, or
-  `pastoralNotes` begin writing to Firestore.
+- Extend rules tests when group settings or future role administration begin
+  writing to Firestore.
 - Keep user membership mirrors synchronized with authoritative group
   memberships.
 - Add owner-managed leader/viewer assignment before inviting or assigning more

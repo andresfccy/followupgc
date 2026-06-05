@@ -96,7 +96,7 @@ Validation:
 
 Remaining:
 
-- Add remote pastoral notes before re-enabling the bitacora form.
+- Add remote group settings before re-enabling the parametros form.
 
 ## 2026-06-04: Phase 5H Remote Attendance Implemented
 
@@ -127,6 +127,33 @@ Validation:
 - `pnpm functions:lint` passed.
 - `pnpm functions:test` passed: 4 executed, 4 passed, 0 failed.
 - `pnpm test:rules` passed: 33 executed, 33 passed, 0 failed.
+
+## 2026-06-04: Phase 5I Remote Pastoral Notes Implemented
+
+Remote pastoral notes are implemented as Firebase production data under each
+member.
+
+What changed:
+
+- Added `src/lib/remotePastoralNotes.ts` for Firestore subscriptions and
+  creates under `groups/{groupId}/members/{memberId}/pastoralNotes/{noteId}`.
+- Updated `src/App.tsx` so the selected member loads their pastoral notes from
+  Firestore and owner/leader users can create note, care, prayer, or milestone
+  entries.
+- Viewer users cannot read or write pastoral notes.
+- Extended `firestore.rules` with a validated pastoral note shape:
+  `memberId`, `date`, `type`, `body`, `createdBy`, `createdAt`, and
+  `updatedAt`.
+- Pastoral note writes require an active owner/leader, an existing public
+  member document, route `memberId` consistency, valid note type, non-empty
+  body, and stable `createdBy`.
+- Extended Firestore Rules tests with pastoral note access and shape coverage.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm test:rules` passed: 36 executed, 36 passed, 0 failed.
 
 ## 2026-06-04: Node 22 Runtime Alignment
 

@@ -158,6 +158,25 @@ service cloud.firestore {
       (!('comment' in request.resource.data) || request.resource.data.comment is string);
     }
 
+    function validPastoralNoteDoc(memberId) {
+      return request.resource.data.keys().hasOnly([
+        'memberId',
+        'date',
+        'type',
+        'body',
+        'createdBy',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.memberId == memberId &&
+      request.resource.data.date is string &&
+      request.resource.data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+      request.resource.data.type in ['note', 'prayer', 'care', 'milestone'] &&
+      request.resource.data.body is string &&
+      request.resource.data.body.size() > 0 &&
+      request.resource.data.createdBy is string;
+    }
+
     function validRole(role) {
       return role in ['owner', 'leader', 'viewer'];
     }
@@ -301,7 +320,16 @@ service cloud.firestore {
         allow delete: if false;
 
         match /pastoralNotes/{noteId} {
-          allow read, create, update, delete: if isLeaderOrOwner(groupId);
+          allow read: if isLeaderOrOwner(groupId);
+          allow create: if isLeaderOrOwner(groupId) &&
+            exists(memberPath(groupId, memberId)) &&
+            validPastoralNoteDoc(memberId) &&
+            request.resource.data.createdBy == request.auth.uid;
+          allow update: if isLeaderOrOwner(groupId) &&
+            exists(memberPath(groupId, memberId)) &&
+            validPastoralNoteDoc(memberId) &&
+            request.resource.data.createdBy == resource.data.createdBy;
+          allow delete: if isLeaderOrOwner(groupId);
         }
 
         match /private/profile {

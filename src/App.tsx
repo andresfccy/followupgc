@@ -17,6 +17,7 @@ import {
 import type {
   AttendanceStatus,
   MemberStatus,
+  TimelineEntryType,
   Weekday,
 } from '@/domain/types'
 import { formatDate, getWeekdayLabel, nextMeetingDate, weekdayOptions } from '@/lib/date'
@@ -50,6 +51,11 @@ import {
   subscribeRemoteAttendance,
   type RemoteAttendanceRecord,
 } from '@/lib/remoteAttendance'
+import {
+  createRemotePastoralNote,
+  subscribeRemotePastoralNotes,
+  type RemotePastoralNote,
+} from '@/lib/remotePastoralNotes'
 import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { clearLegacyGroupStorage } from '@/lib/legacyLocalStorage'
@@ -59,6 +65,13 @@ const attendanceLabels: Record<AttendanceStatus, string> = {
   present: 'Presente',
   absent: 'Ausente',
   excused: 'Excusa',
+}
+
+const timelineTypeLabels: Record<TimelineEntryType, string> = {
+  note: 'Nota',
+  prayer: 'Oracion',
+  care: 'Cuidado',
+  milestone: 'Hito',
 }
 
 const memberStatusLabels: Record<MemberStatus, string> = {
@@ -85,6 +98,12 @@ function App() {
     attendances: RemoteAttendanceRecord[]
     error: string
   }>({ groupId: '', meetingId: '', attendances: [], error: '' })
+  const [remotePastoralNotesState, setRemotePastoralNotesState] = useState<{
+    groupId: string
+    memberId: string
+    notes: RemotePastoralNote[]
+    error: string
+  }>({ groupId: '', memberId: '', notes: [], error: '' })
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [editingMeetingId, setEditingMeetingId] = useState('')
@@ -118,6 +137,24 @@ function App() {
     : members[0]?.id ?? ''
 
   const selectedMember = members.find((member) => member.id === effectiveSelectedMemberId)
+  const pastoralNotes =
+    selectedMember &&
+    remotePastoralNotesState.groupId === authSession.currentGroupId &&
+    remotePastoralNotesState.memberId === selectedMember.id
+      ? remotePastoralNotesState.notes
+      : []
+  const remotePastoralNotesError =
+    selectedMember &&
+    remotePastoralNotesState.groupId === authSession.currentGroupId &&
+    remotePastoralNotesState.memberId === selectedMember.id
+      ? remotePastoralNotesState.error
+      : ''
+  const isLoadingPastoralNotes = Boolean(
+    authSession.currentGroupId &&
+      selectedMember?.id &&
+      (remotePastoralNotesState.groupId !== authSession.currentGroupId ||
+        remotePastoralNotesState.memberId !== selectedMember.id),
+  )
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? sessions[0]
   const attendances =
@@ -192,6 +229,25 @@ function App() {
       },
     )
   }, [authSession.currentGroupId, selectedSession?.id, selectedSession?.status])
+
+  useEffect(() => {
+    if (!authSession.currentGroupId || !selectedMember?.id) {
+      return undefined
+    }
+
+    return subscribeRemotePastoralNotes(
+      authSession.currentGroupId,
+      selectedMember.id,
+      ({ notes, error }) => {
+        setRemotePastoralNotesState({
+          groupId: authSession.currentGroupId,
+          memberId: selectedMember.id,
+          notes,
+          error,
+        })
+      },
+    )
+  }, [authSession.currentGroupId, selectedMember?.id])
 
   useEffect(() => {
     if (!authSession.currentGroupId) {
@@ -304,9 +360,46 @@ function App() {
     }
   }
 
-  function handleAddTimelineEntry(event: FormEvent<HTMLFormElement>) {
+  async function handleAddTimelineEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setAuthStatus('La bitacora pastoral se escribira cuando el modulo remoto de notas este listo.')
+
+    if (!authSession.user || !authSession.currentGroupId || !selectedMember) {
+      setAuthStatus('Selecciona una persona remota antes de registrar la bitacora.')
+      return
+    }
+
+    if (!canManageMeetings) {
+      setAuthStatus('Solo owner o leader activos pueden registrar bitacora pastoral.')
+      return
+    }
+
+    const form = new FormData(event.currentTarget)
+    const typeValue = String(form.get('type') ?? 'note')
+    const input = {
+      date: String(form.get('date') ?? ''),
+      type:
+        typeValue === 'prayer' || typeValue === 'care' || typeValue === 'milestone'
+          ? typeValue
+          : 'note',
+      body: String(form.get('body') ?? ''),
+    } satisfies {
+      date: string
+      type: TimelineEntryType
+      body: string
+    }
+
+    try {
+      await createRemotePastoralNote(
+        authSession.user,
+        authSession.currentGroupId,
+        selectedMember.id,
+        input,
+      )
+      event.currentTarget.reset()
+      setAuthStatus('Bitacora pastoral registrada en Firebase.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo guardar la bitacora.')
+    }
   }
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -760,11 +853,23 @@ function App() {
                     </label>
                   </div>
                   <Field label="Comentario" name="body" placeholder="Que ocurrio y que seguimiento requiere" />
-                  <button className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800">
+                  <button
+                    className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                    disabled={!canManageMeetings}
+                  >
                     <Plus size={16} /> Agregar a bitacora
                   </button>
+                  {!canManageMeetings ? (
+                    <p className="text-sm text-slate-600">
+                      Solo owner o leader activos pueden registrar bitacora pastoral.
+                    </p>
+                  ) : null}
                 </form>
-                <Timeline memberId={selectedMember.id} />
+                <Timeline
+                  error={remotePastoralNotesError}
+                  isLoading={isLoadingPastoralNotes}
+                  notes={pastoralNotes}
+                />
               </div>
             ) : (
               <EmptyState text="Selecciona una persona para ver su proceso." />
@@ -1468,10 +1573,42 @@ function MemberSummary({ member }: { member: RemoteMember }) {
   )
 }
 
-function Timeline({ memberId }: { memberId: string }) {
-  void memberId
+function Timeline({
+  error,
+  isLoading,
+  notes,
+}: {
+  error: string
+  isLoading: boolean
+  notes: RemotePastoralNote[]
+}) {
+  if (isLoading) {
+    return <EmptyState text="Cargando bitacora desde Firestore..." />
+  }
 
-  return <EmptyState text="La bitacora remota se habilitara en una fase posterior." />
+  if (error) {
+    return <EmptyState text={error} />
+  }
+
+  if (!notes.length) {
+    return <EmptyState text="Esta persona aun no tiene bitacora pastoral remota." />
+  }
+
+  return (
+    <div className="grid gap-3">
+      {notes.map((entry) => (
+        <article className="rounded-md border border-slate-200 bg-white p-3" key={entry.id}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-950">{formatDate(entry.date)}</p>
+            <span className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-700">
+              {timelineTypeLabels[entry.type]}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-700">{entry.body}</p>
+        </article>
+      ))}
+    </div>
+  )
 }
 
 function EmptyState({ text }: { text: string }) {

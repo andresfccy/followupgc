@@ -5,7 +5,8 @@
 Phase 4.5 added automated Firestore Security Rules tests before any local
 pastoral data is migrated to Firestore. Phase 5C expanded the suite for
 importRuns, previewRows, public member docs, and private profiles. Phase 5H
-adds remote meetings and attendance coverage.
+adds remote meetings and attendance coverage. Phase 5I adds pastoral note
+coverage.
 
 The tests validate that `firestore.rules` protects the remote identity layer:
 
@@ -18,11 +19,12 @@ The tests validate that `firestore.rules` protects the remote identity layer:
 - `groups/{groupId}/importRuns/{importRunId}/previewRows/{rowId}`
 - `groups/{groupId}/members/{memberId}`
 - `groups/{groupId}/members/{memberId}/private/profile`
+- `groups/{groupId}/members/{memberId}/pastoralNotes/{noteId}`
 - `groups/{groupId}/meetings/{meetingId}`
 - `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`
 
 These tests do not confirm/import final members, migrate localStorage, or move
-pastoral notes or local settings.
+local settings.
 
 ## How To Run
 
@@ -62,12 +64,12 @@ rules-focused runner.
 
 ## Latest Result
 
-Phase 5H validation uses Java 21 and the Firebase emulators.
+Phase 5I validation uses Java 21 and the Firebase emulators.
 
 Latest result:
 
 - `java -version`: OpenJDK 21.0.11.
-- `pnpm test:rules`: 33 tests executed, 33 passed, 0 failed, exit code 0.
+- `pnpm test:rules`: 36 tests executed, 36 passed, 0 failed, exit code 0.
 - `pnpm test:storage-rules`: 4 tests executed, 4 passed, 0 failed, exit code
   0.
 - Firestore and Storage emulators started and shut down correctly.
@@ -167,6 +169,15 @@ Private profiles:
 - `viewer`, inactive members, signed-out users, and unaffiliated users cannot
   read or write private profiles.
 
+Pastoral notes:
+
+- `owner` and `leader` can create, read, update, and delete pastoral notes.
+- `viewer`, inactive members, signed-out users, and unaffiliated users cannot
+  read or write pastoral notes.
+- Pastoral notes require the expected shape, an existing public member, route
+  `memberId` consistency, valid note type, non-empty body, and stable
+  `createdBy`.
+
 Storage uploads:
 
 - `owner` and `leader` can upload/read
@@ -193,8 +204,6 @@ authorization.
 - Viewer can read public member docs only because full `documentId`, phone,
   birthday, and pastoral notes are excluded from that document. Revisit whether
   `documentIdHash` should remain viewer-readable before broad production use.
-- Rules do not validate final `pastoralNotes` documents because that collection
-  is not written by the app yet.
 - Firestore and Storage Rules tests use the emulator with project id
   `demo-followupgc-rules` because Storage Rules consult Firestore membership
   documents and both suites must share the same project id.

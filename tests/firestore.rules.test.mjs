@@ -797,6 +797,108 @@ test('viewer, inactive, signed-out, and unaffiliated users cannot access private
   )
 })
 
+test('owner and leader can create, read, update, and delete pastoral notes', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'leader-a', role: 'leader', status: 'active' },
+    ],
+  })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+
+  await assertSucceeds(
+    authedDb('owner-a')
+      .doc('groups/group-a/members/member-a/pastoralNotes/note-a')
+      .set(validPastoralNote({ memberId: 'member-a', createdBy: 'owner-a' })),
+  )
+  await assertSucceeds(
+    authedDb('leader-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').get(),
+  )
+  await assertSucceeds(
+    authedDb('leader-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').set(
+      {
+        body: 'Seguimiento actualizado.',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertSucceeds(
+    authedDb('leader-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').delete(),
+  )
+})
+
+test('viewer, inactive, signed-out, and unaffiliated users cannot access pastoral notes', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'viewer-a', role: 'viewer', status: 'active' },
+      { uid: 'inactive-a', role: 'leader', status: 'inactive' },
+    ],
+  })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+  await seedPastoralNote({ groupId: 'group-a', memberId: 'member-a', noteId: 'note-a' })
+
+  await assertFails(authedDb('viewer-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').get())
+  await assertFails(authedDb('inactive-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').get())
+  await assertFails(authedDb('stranger-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').get())
+  await assertFails(
+    testEnv.unauthenticatedContext().firestore().doc('groups/group-a/members/member-a/pastoralNotes/note-a').get(),
+  )
+  await assertFails(
+    authedDb('viewer-a')
+      .doc('groups/group-a/members/member-a/pastoralNotes/note-b')
+      .set(validPastoralNote({ memberId: 'member-a', createdBy: 'viewer-a' })),
+  )
+})
+
+test('pastoral notes require expected shape, existing member, and stable createdBy', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'leader-a', role: 'leader', status: 'active' },
+    ],
+  })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+  await seedPastoralNote({ groupId: 'group-a', memberId: 'member-a', noteId: 'note-a' })
+
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/members/member-a/pastoralNotes/note-b')
+      .set(validPastoralNote({ memberId: 'other-member', createdBy: 'owner-a' })),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/members/member-a/pastoralNotes/note-b')
+      .set({ ...validPastoralNote({ memberId: 'member-a', createdBy: 'owner-a' }), type: 'alert' }),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/members/member-a/pastoralNotes/note-b')
+      .set({ ...validPastoralNote({ memberId: 'member-a', createdBy: 'owner-a' }), body: '' }),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/members/missing-member/pastoralNotes/note-b')
+      .set(validPastoralNote({ memberId: 'missing-member', createdBy: 'owner-a' })),
+  )
+  await assertFails(
+    authedDb('leader-a').doc('groups/group-a/members/member-a/pastoralNotes/note-a').set(
+      {
+        createdBy: 'leader-a',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+})
+
 function authedDb(uid) {
   return testEnv.authenticatedContext(uid).firestore()
 }
@@ -866,6 +968,15 @@ async function seedPrivateProfile({ groupId, memberId }) {
       .firestore()
       .doc(`groups/${groupId}/members/${memberId}/private/profile`)
       .set(validPrivateProfile())
+  })
+}
+
+async function seedPastoralNote({ groupId, memberId, noteId }) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context
+      .firestore()
+      .doc(`groups/${groupId}/members/${memberId}/pastoralNotes/${noteId}`)
+      .set(validPastoralNote({ memberId, createdBy: 'owner-a' }))
   })
 }
 
@@ -977,6 +1088,18 @@ function validAttendance({ meetingId, memberId, recordedBy, status = 'present' }
     status,
     recordedBy,
     recordedAt: now,
+    updatedAt: now,
+  }
+}
+
+function validPastoralNote({ memberId, createdBy, type = 'note' }) {
+  return {
+    memberId,
+    date: '2026-06-05',
+    type,
+    body: 'Conversacion pastoral y seguimiento.',
+    createdBy,
+    createdAt: now,
     updatedAt: now,
   }
 }
