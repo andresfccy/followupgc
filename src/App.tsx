@@ -17,7 +17,6 @@ import {
 import type {
   AttendanceStatus,
   AttendanceRecord,
-  GroupSession,
   MemberStatus,
   Weekday,
 } from '@/domain/types'
@@ -40,6 +39,13 @@ import {
   subscribeRemoteMembers,
   type RemoteMember,
 } from '@/lib/remoteMembers'
+import {
+  createRemoteMeeting,
+  deleteRemoteMeeting,
+  subscribeRemoteMeetings,
+  updateRemoteMeeting,
+  type RemoteMeeting,
+} from '@/lib/remoteMeetings'
 import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { clearLegacyGroupStorage } from '@/lib/legacyLocalStorage'
@@ -57,7 +63,6 @@ const memberStatusLabels: Record<MemberStatus, string> = {
   inactive: 'Inactivo',
 }
 
-const emptySessions: GroupSession[] = []
 const emptyAttendances: AttendanceRecord[] = []
 
 function App() {
@@ -67,8 +72,14 @@ function App() {
     members: RemoteMember[]
     error: string
   }>({ groupId: '', members: [], error: '' })
+  const [remoteMeetingsState, setRemoteMeetingsState] = useState<{
+    groupId: string
+    meetings: RemoteMeeting[]
+    error: string
+  }>({ groupId: '', meetings: [], error: '' })
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
+  const [editingMeetingId, setEditingMeetingId] = useState('')
   const [importStatus, setImportStatus] = useState(
     'El Excel oficial se sube a Firebase Storage y se procesa en backend antes de escribir en Firestore.',
   )
@@ -80,7 +91,13 @@ function App() {
   const [authStatus, setAuthStatus] = useState('')
   const meetingWeekday = 5 as Weekday
   const groupName = authSession.currentMembership?.groupName ?? 'FollowUpGC'
-  const sessions = emptySessions
+  const sessions =
+    remoteMeetingsState.groupId === authSession.currentGroupId ? remoteMeetingsState.meetings : []
+  const remoteMeetingsError =
+    remoteMeetingsState.groupId === authSession.currentGroupId ? remoteMeetingsState.error : ''
+  const isLoadingMeetings = Boolean(
+    authSession.currentGroupId && remoteMeetingsState.groupId !== authSession.currentGroupId,
+  )
   const attendances = emptyAttendances
   const members =
     remoteMembersState.groupId === authSession.currentGroupId ? remoteMembersState.members : []
@@ -96,6 +113,11 @@ function App() {
   const selectedMember = members.find((member) => member.id === effectiveSelectedMemberId)
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? sessions[0]
+  const editingMeeting = sessions.find((session) => session.id === editingMeetingId)
+  const canManageMeetings = Boolean(
+    authSession.currentMembership &&
+      ['owner', 'leader'].includes(authSession.currentMembership.role),
+  )
 
   const heldSessions = sessions.filter((session) => session.status === 'held')
   const presentCount = attendances.filter((item) => item.status === 'present').length
@@ -127,6 +149,20 @@ function App() {
   }, [authSession.currentGroupId])
 
   useEffect(() => {
+    if (!authSession.currentGroupId) {
+      return undefined
+    }
+
+    return subscribeRemoteMeetings(authSession.currentGroupId, ({ meetings, error }) => {
+      setRemoteMeetingsState({
+        groupId: authSession.currentGroupId,
+        meetings,
+        error,
+      })
+    })
+  }, [authSession.currentGroupId])
+
+  useEffect(() => {
     if (!authSession.currentGroupId || !activeImportRunId) {
       return undefined
     }
@@ -144,9 +180,53 @@ function App() {
     )
   }
 
-  function handleAddSession(event: FormEvent<HTMLFormElement>) {
+  async function handleAddSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setAuthStatus('Las reuniones se registraran cuando la persistencia remota de reuniones este lista.')
+
+    if (!authSession.user || !authSession.currentGroupId || !canManageMeetings) {
+      setAuthStatus('Solo owner o leader activos pueden registrar reuniones.')
+      return
+    }
+
+    const form = new FormData(event.currentTarget)
+
+    try {
+      const input = {
+        date: String(form.get('date') ?? ''),
+        title: String(form.get('title') ?? 'Grupo en casa'),
+        status: String(form.get('status')) === 'cancelled' ? 'cancelled' : 'held',
+        comment: String(form.get('comment') ?? ''),
+      } as const
+
+      if (editingMeetingId) {
+        await updateRemoteMeeting(authSession.currentGroupId, editingMeetingId, input)
+        setAuthStatus('Reunion actualizada en Firebase.')
+        setEditingMeetingId('')
+      } else {
+        await createRemoteMeeting(authSession.user, authSession.currentGroupId, input)
+        setAuthStatus('Reunion registrada en Firebase.')
+      }
+
+      event.currentTarget.reset()
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo guardar la reunion.')
+    }
+  }
+
+  async function handleDeleteMeeting(meetingId: string) {
+    if (!authSession.currentGroupId || !canManageMeetings) {
+      setAuthStatus('Solo owner o leader activos pueden eliminar reuniones.')
+      return
+    }
+
+    try {
+      await deleteRemoteMeeting(authSession.currentGroupId, meetingId)
+      if (selectedSessionId === meetingId) setSelectedSessionId('')
+      if (editingMeetingId === meetingId) setEditingMeetingId('')
+      setAuthStatus('Reunion eliminada.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo eliminar la reunion.')
+    }
   }
 
   function handleAddTimelineEntry(event: FormEvent<HTMLFormElement>) {
@@ -412,30 +492,75 @@ function App() {
           </Panel>
 
           <Panel title="Programacion y asistencias" icon={CalendarCheck}>
-            <form className="grid gap-3 border-b border-slate-200 pb-4" onSubmit={handleAddSession}>
+            <form
+              className="grid gap-3 border-b border-slate-200 pb-4"
+              key={editingMeeting?.id ?? 'new-meeting'}
+              onSubmit={handleAddSession}
+            >
               <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Fecha" name="date" type="date" />
-                <Field label="Titulo" name="title" placeholder="Grupo en casa" />
+                <Field
+                  defaultValue={editingMeeting?.date}
+                  label="Fecha"
+                  name="date"
+                  type="date"
+                />
+                <Field
+                  defaultValue={editingMeeting?.title}
+                  label="Titulo"
+                  name="title"
+                  placeholder="Grupo en casa"
+                />
                 <label className="grid gap-1 text-sm font-medium text-slate-700">
                   Estado
-                  <select name="status" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950">
+                  <select
+                    className="h-10 rounded-md border border-slate-300 bg-white px-3 text-slate-950"
+                    defaultValue={editingMeeting?.status ?? 'held'}
+                    name="status"
+                  >
                     <option value="held">Realizado</option>
                     <option value="cancelled">No realizado</option>
                   </select>
                 </label>
               </div>
-              <Field label="Comentario" name="comment" placeholder="Motivo o resumen" />
-              <button className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-700">
-                <Plus size={16} /> Registrar fecha
-              </button>
+              <Field
+                defaultValue={editingMeeting?.comment}
+                label="Comentario"
+                name="comment"
+                placeholder="Motivo o resumen"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  disabled={!canManageMeetings}
+                >
+                  <Plus size={16} /> {editingMeeting ? 'Actualizar fecha' : 'Registrar fecha'}
+                </button>
+                {editingMeeting ? (
+                  <button
+                    className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-500"
+                    onClick={() => setEditingMeetingId('')}
+                    type="button"
+                  >
+                    Cancelar edicion
+                  </button>
+                ) : null}
+              </div>
+              {!canManageMeetings ? (
+                <p className="text-sm text-slate-600">
+                  Solo owner o leader activos pueden registrar reuniones.
+                </p>
+              ) : null}
             </form>
 
             <div className="mt-4 grid gap-3">
-              {!sortedSessions.length ? (
-                <EmptyState text="Las reuniones remotas se habilitaran despues de estabilizar miembros en Firestore." />
-              ) : null}
+              <RemoteMeetingsStateMessage
+                authSession={authSession}
+                error={remoteMeetingsError}
+                isLoading={isLoadingMeetings}
+                meetings={sessions}
+              />
               {sortedSessions.map((session) => (
-                <button
+                <div
                   key={session.id}
                   className={cn(
                     'rounded-md border p-3 text-left transition hover:border-emerald-500',
@@ -443,20 +568,43 @@ function App() {
                       ? 'border-emerald-600 bg-emerald-50'
                       : 'border-slate-200 bg-white',
                   )}
-                  onClick={() => setSelectedSessionId(session.id)}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-slate-950">{session.title}</p>
-                      <p className="text-sm text-slate-600">{formatDate(session.date)}</p>
+                  <button
+                    className="w-full text-left"
+                    onClick={() => setSelectedSessionId(session.id)}
+                    type="button"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-950">{session.title}</p>
+                        <p className="text-sm text-slate-600">{formatDate(session.date)}</p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-700">
+                        {session.status === 'held' ? <CalendarCheck size={14} /> : <CalendarX2 size={14} />}
+                        {session.status === 'held' ? 'Realizado' : 'No realizado'}
+                      </span>
                     </div>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-700">
-                      {session.status === 'held' ? <CalendarCheck size={14} /> : <CalendarX2 size={14} />}
-                      {session.status === 'held' ? 'Realizado' : 'No realizado'}
-                    </span>
-                  </div>
-                  {session.comment ? <p className="mt-2 text-sm text-slate-600">{session.comment}</p> : null}
-                </button>
+                    {session.comment ? <p className="mt-2 text-sm text-slate-600">{session.comment}</p> : null}
+                  </button>
+                  {canManageMeetings ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:border-emerald-600"
+                        onClick={() => setEditingMeetingId(session.id)}
+                        type="button"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        className="h-9 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-900 hover:border-red-400"
+                        onClick={() => handleDeleteMeeting(session.id)}
+                        type="button"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           </Panel>
@@ -638,6 +786,44 @@ function RemoteMembersList({
       ))}
     </div>
   )
+}
+
+function RemoteMeetingsStateMessage({
+  authSession,
+  error,
+  isLoading,
+  meetings,
+}: {
+  authSession: AuthSession
+  error: string
+  isLoading: boolean
+  meetings: RemoteMeeting[]
+}) {
+  if (!authSession.isConfigured) {
+    return <EmptyState text="Configura Firebase para cargar reuniones remotas." />
+  }
+
+  if (!authSession.user) {
+    return <EmptyState text="Inicia sesion para cargar reuniones desde Firebase." />
+  }
+
+  if (!authSession.currentGroupId) {
+    return <EmptyState text="Selecciona o crea un grupo remoto para ver sus reuniones." />
+  }
+
+  if (isLoading) {
+    return <EmptyState text="Cargando reuniones desde Firestore..." />
+  }
+
+  if (error) {
+    return <EmptyState text={error} />
+  }
+
+  if (!meetings.length) {
+    return <EmptyState text="Este grupo remoto aun no tiene reuniones registradas." />
+  }
+
+  return null
 }
 
 function AuthPanel({

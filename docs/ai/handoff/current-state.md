@@ -1,5 +1,106 @@
 # Current State
 
+## 2026-06-04: Firebase-Only Persistence Direction
+
+Product direction updated:
+
+- FollowUpGC should no longer preserve localStorage/demo mode as an ongoing
+  product path.
+- Firebase is the intended durable persistence layer for production data.
+- Phase 5E should read remote members from Firestore for the selected remote
+  group as the production source of truth.
+- Phase 5F retires localStorage/demo persistence from the product flow.
+- Existing `followupgc-data` should be cleared or ignored during the
+  Firebase-only transition, not uploaded to Firestore.
+- No local browser data needs to be preserved; the Firebase-backed app should
+  start from an empty production state unless Firestore already has group data.
+
+## 2026-06-04: Phase 5E Remote Member Read Implemented
+
+The main app now reads production members from Firestore for the selected
+remote group.
+
+What changed:
+
+- Added `src/lib/remoteMembers.ts` with a repository-style Firestore
+  subscription for public member docs under `groups/{groupId}/members`.
+- Updated `src/App.tsx` so the visible member list, selected member summary,
+  and person metric use remote members, not Zustand/localStorage members.
+- Added signed-out, unconfigured Firebase, no group, loading, error, and empty
+  remote-member states.
+- Stopped showing local seed sessions, attendance, and timeline entries in the
+  production UI.
+- Converted local durable write flows for manual members, sessions, attendance,
+  notes, and settings into blocked/informational states until their Firebase
+  write modules are implemented.
+- Added `src/lib/legacyLocalStorage.ts` and clears the legacy
+  `followupgc-data` key on app startup.
+- Updated persistence, privacy, and component docs to reflect Firebase-only
+  production persistence.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm dev --host 127.0.0.1` started successfully with escalated permissions,
+  but a sandbox `curl` check could not connect back to the escalated server.
+
+## 2026-06-04: Phase 5F LocalStorage Demo Persistence Removed
+
+The local/demo persistence path has been removed from the production app.
+
+What changed:
+
+- Deleted `src/store/groupStore.ts`.
+- Deleted `src/lib/memberImport.ts`.
+- Deleted `src/domain/seed.ts`.
+- Removed local import contract types from `src/domain/types.ts`.
+- Removed direct `zustand` and `zod` dependencies from `package.json`.
+- Updated base architecture, persistence, domain, component, roadmap, and
+  handoff docs to point at Firebase repositories instead of Zustand/localStorage.
+
+Remaining:
+
+- Implement Firebase write/read modules for meetings, attendance, pastoral
+  notes, and group settings before re-enabling those forms.
+
+## 2026-06-04: Phase 5G Remote Meetings Implemented
+
+Remote meetings are implemented as Firebase production data.
+
+What changed:
+
+- Added `src/lib/remoteMeetings.ts` for Firestore meeting subscriptions,
+  create/update writes, and callable deletion requests.
+- Added `functions/src/meetings.ts` with `deleteMeeting`.
+- Exported `deleteMeeting` from `functions/src/index.ts`.
+- Extended `firestore.rules` with a validated meeting shape:
+  `date`, `status`, `title`, optional `comment`, `createdBy`, `createdAt`, and
+  `updatedAt`.
+- Firestore Rules allow active `owner` and `leader` to create/update meetings,
+  active members to read, and deny direct client delete.
+- `deleteMeeting` checks active owner/leader membership and refuses deletion
+  when the meeting has child collection records such as attendance.
+- Updated `src/App.tsx` so meetings load from Firestore and owner/leader users
+  can create, edit, and request deletion.
+- Attendance remains disabled until the remote attendance phase.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm --dir functions build` passed with a local Node 26 warning because
+  functions target Node 20.
+- `pnpm test:rules` could not run because the `firebase` CLI is not installed
+  in this environment.
+
+Remaining:
+
+- Install or expose Firebase CLI locally and run `pnpm test:rules` before
+  deploying rules.
+- Add dedicated callable tests for `deleteMeeting`.
+- Implement Phase 5H remote attendance under meeting subcollections.
+
 ## 2026-05-22: Agent Harness Structure
 
 The repository now has a modular agent harness under `docs/ai/`, with
@@ -321,6 +422,8 @@ Remaining risk:
 
 ## 2026-05-29: Initial Production Data Source Decision
 
+Superseded on 2026-06-04 by the Firebase-only persistence direction above.
+
 Product decision: the first real production data load will come from the
 official church Excel file, not from localStorage.
 
@@ -632,6 +735,10 @@ Validation:
 - `scripts/ai/verify.sh` passed.
 
 ## 2026-05-26: Firebase Auth And Firestore Phase 2 Design
+
+Superseded on 2026-06-04 for persistence mode: Firebase is now the intended
+durable production layer, not an optional remote layer preserving local-only
+mode.
 
 Firebase Phase 2 is documented as a design-only phase for Auth, Firestore,
 multi-group support, roles, default groups, migration, privacy, and future XLSX

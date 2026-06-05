@@ -24,8 +24,16 @@
   adds Firestore Rules plus Storage Rules tests.
 - Phase 5D now adds confirmed backend writes from ImportPreview to Firestore
   members after explicit confirmation.
-- Next recommended phase: Phase 5E - read remote members from Firestore for
-  the selected remote group while preserving local/demo mode.
+- Phase 5E is implemented: the main UI reads remote members from Firestore for
+  the selected remote group as the production source of truth.
+- Phase 5F is implemented: localStorage/demo persistence was removed from the
+  production app and Firebase is the only durable persistence layer.
+- Phase 5G is implemented: remote meetings are stored under
+  `groups/{groupId}/meetings`, and owner/leader users can create, edit, and
+  request deletion from the UI.
+- Next recommended phase: run `pnpm test:rules` once Firebase CLI is available,
+  add callable tests for `deleteMeeting`, then implement Phase 5H remote
+  attendance under `groups/{groupId}/meetings/{meetingId}/attendance`.
 - Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
   `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
@@ -69,6 +77,8 @@
   profile model, backend-generated preview, and explicit confirmation.
 - Add dedicated Cloud Function tests for `confirmChurchXlsxImport`
   create/update behavior before broad production use.
-- localStorage -> Firestore migration is deferred/optional. Revisit only if
-  users have real local data to preserve. Do not migrate seeds, demo data,
-  local development data, or local test data.
+- Do not migrate localStorage into Firestore. Existing `followupgc-data` should
+  be cleared or ignored during the Firebase-only transition; never upload seeds,
+  demo data, local development data, or local test data.
+- Implement Firebase repositories and rules tests before re-enabling writes for
+  meetings, attendance, pastoral notes, or group settings.

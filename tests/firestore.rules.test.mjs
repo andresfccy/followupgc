@@ -323,23 +323,117 @@ test('only owners can change membership roles or statuses', async () => {
   )
 })
 
-test('viewer, inactive, and unaffiliated users cannot write future group data', async () => {
+test('owner and leader can create, read, and update meetings', async () => {
   await seedGroup({
     groupId: 'group-a',
     createdBy: 'owner-a',
     memberships: [
       { uid: 'owner-a', role: 'owner', status: 'active' },
       { uid: 'leader-a', role: 'leader', status: 'active' },
+    ],
+  })
+
+  await assertSucceeds(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/meeting-a')
+      .set(validMeeting({ createdBy: 'owner-a' })),
+  )
+  await assertSucceeds(authedDb('leader-a').doc('groups/group-a/meetings/meeting-a').get())
+  await assertSucceeds(
+    authedDb('leader-a').doc('groups/group-a/meetings/meeting-a').set(
+      {
+        comment: 'No hubo reunion por actividad general.',
+        status: 'cancelled',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+})
+
+test('viewer, inactive, signed-out, and unaffiliated users cannot write meetings', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
       { uid: 'viewer-a', role: 'viewer', status: 'active' },
       { uid: 'inactive-a', role: 'leader', status: 'inactive' },
     ],
   })
 
-  await assertSucceeds(authedDb('owner-a').doc('groups/group-a/meetings/meeting-a').set({}))
-  await assertSucceeds(authedDb('leader-a').doc('groups/group-a/meetings/meeting-b').set({}))
-  await assertFails(authedDb('viewer-a').doc('groups/group-a/meetings/meeting-c').set({}))
-  await assertFails(authedDb('inactive-a').doc('groups/group-a/meetings/meeting-d').set({}))
-  await assertFails(authedDb('stranger-a').doc('groups/group-a/meetings/meeting-e').set({}))
+  await assertFails(
+    authedDb('viewer-a')
+      .doc('groups/group-a/meetings/meeting-viewer')
+      .set(validMeeting({ createdBy: 'viewer-a' })),
+  )
+  await assertFails(
+    authedDb('inactive-a')
+      .doc('groups/group-a/meetings/meeting-inactive')
+      .set(validMeeting({ createdBy: 'inactive-a' })),
+  )
+  await assertFails(
+    authedDb('stranger-a')
+      .doc('groups/group-a/meetings/meeting-stranger')
+      .set(validMeeting({ createdBy: 'stranger-a' })),
+  )
+  await assertFails(
+    testEnv
+      .unauthenticatedContext()
+      .firestore()
+      .doc('groups/group-a/meetings/meeting-signed-out')
+      .set(validMeeting({ createdBy: 'signed-out' })),
+  )
+})
+
+test('viewer can read meetings but cannot update or delete them', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'viewer-a', role: 'viewer', status: 'active' },
+    ],
+  })
+  await seedMeeting({ groupId: 'group-a', meetingId: 'meeting-a', createdBy: 'owner-a' })
+
+  await assertSucceeds(authedDb('viewer-a').doc('groups/group-a/meetings/meeting-a').get())
+  await assertFails(
+    authedDb('viewer-a').doc('groups/group-a/meetings/meeting-a').set(
+      {
+        comment: 'Cambio no permitido',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertFails(authedDb('viewer-a').doc('groups/group-a/meetings/meeting-a').delete())
+})
+
+test('meeting writes require the expected shape and direct delete is denied', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [{ uid: 'owner-a', role: 'owner', status: 'active' }],
+  })
+  await seedMeeting({ groupId: 'group-a', meetingId: 'meeting-a', createdBy: 'owner-a' })
+
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a/meetings/meeting-b').set({
+      date: '06/04/2026',
+      status: 'held',
+      title: 'Grupo en casa',
+      createdBy: 'owner-a',
+      createdAt: now,
+      updatedAt: now,
+    }),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/meeting-c')
+      .set({ ...validMeeting({ createdBy: 'other-user' }) }),
+  )
+  await assertFails(authedDb('owner-a').doc('groups/group-a/meetings/meeting-a').delete())
 })
 
 test('owner and leader can create and read importRuns', async () => {
@@ -667,6 +761,15 @@ async function seedPrivateProfile({ groupId, memberId }) {
   })
 }
 
+async function seedMeeting({ groupId, meetingId, createdBy }) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context
+      .firestore()
+      .doc(`groups/${groupId}/meetings/${meetingId}`)
+      .set(validMeeting({ createdBy }))
+  })
+}
+
 function validGroup({ createdBy }) {
   return {
     name: 'Grupo de prueba',
@@ -742,6 +845,18 @@ function validPrivateProfile() {
     documentId: '123456789',
     phone: '3000000000',
     birthday: '05-29',
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function validMeeting({ createdBy }) {
+  return {
+    date: '2026-06-05',
+    status: 'held',
+    title: 'Grupo en casa',
+    comment: 'Tema semanal',
+    createdBy,
     createdAt: now,
     updatedAt: now,
   }

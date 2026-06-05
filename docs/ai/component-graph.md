@@ -3,14 +3,14 @@
 ```mermaid
 flowchart TD
   main[src/main.tsx] --> app[src/App.tsx]
-  app --> store[src/store/groupStore.ts]
+  app --> remoteMembers[src/lib/remoteMembers.ts]
+  app --> remoteMeetings[src/lib/remoteMeetings.ts]
+  app --> remoteImports[src/lib/remoteImports.ts]
+  app --> remoteGroups[src/lib/remoteGroups.ts]
+  app --> auth[src/lib/useAuthSession.ts]
   app --> types[src/domain/types.ts]
   app --> date[src/lib/date.ts]
   app --> utils[src/lib/utils.ts]
-  store --> seed[src/domain/seed.ts]
-  store --> types
-  store --> utils
-  seed --> types
   date --> types
 ```
 
@@ -19,8 +19,8 @@ flowchart TD
 Owns the first usable screen:
 
 - Header metrics.
-- Member creation and selection.
-- Session creation and selection.
+- Remote member selection.
+- Remote meeting creation, editing, deletion request, and selection.
 - Attendance marking for the selected session.
 - Timeline entry creation for the selected member.
 - Meeting weekday setting.
@@ -45,18 +45,6 @@ Split candidates when the file grows:
 Do not split only for style preference. Split when a feature has enough form,
 list, and interaction logic that ownership becomes clearer outside `App.tsx`.
 
-## `src/store/groupStore.ts`
-
-Owns all persistent mutations:
-
-- `addMember`
-- `addSession`
-- `addTimelineEntry`
-- `setAttendance`
-- `updateMeetingWeekday`
-
-Do not mutate local storage directly from components.
-
 ## `src/domain/types.ts`
 
 Stable domain contract. Prefer additive changes over renaming existing fields.
@@ -76,5 +64,5 @@ Generic frontend utilities only. Do not add domain logic here.
 - `selectedMemberId`
 - `selectedSessionId`
 
-Persistent state should stay in `src/store/groupStore.ts`. Do not mirror store
-collections into component state unless there is a concrete UI reason.
+Durable production state should come from Firebase repository functions.
+Temporary selections and interaction state may remain local to `App.tsx`.

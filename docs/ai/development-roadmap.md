@@ -14,11 +14,13 @@ persist and `localStorage`. Firebase Auth is implemented for Google Sign-In and
 email/password. Firestore now stores minimal remote group identity, group
 memberships, user group lookup records, and `defaultGroupId`.
 
-Product decision: localStorage is not the source of production data now. The
-first real production data load should come from the official church Excel file
-through parsing, normalization, mandatory preview, explicit confirmation, and
-controlled Firestore writes. Seeds, local development data, demo data, and
-localStorage test data must not be migrated as production data.
+Product decision: Firebase is now the intended persistence layer for production
+use. The localStorage/demo version should be retired from the product flow, not
+preserved as an ongoing mode. The first real production data load should come
+from the official church Excel file through parsing, normalization, mandatory
+preview, explicit confirmation, and controlled Firestore writes. Seeds, local
+development data, demo data, and localStorage test data must not be migrated as
+production data.
 
 ## Completed Phases
 
@@ -240,15 +242,48 @@ Remaining:
 
 ### Phase 5E - Read Remote Members From Firestore
 
-Status: Next / Planned
+Status: Completed
 
 Tasks:
 
 - Read remote members for the selected remote group.
-- Preserve local/demo/fallback mode.
+- Treat Firestore members as the production source of truth.
+- Stop presenting local/demo data as the operational member list once a remote
+  group is active.
 - Avoid mixing local test data with remote production data.
+- Add empty, loading, signed-out, and unconfigured-Firebase states that make it
+  clear persistence requires Firebase.
 
-### Phase 5F - Remote Member Create/Edit
+### Phase 5F - Retire LocalStorage Demo Persistence
+
+Status: Completed
+
+Tasks:
+
+- Remove the product dependency on Zustand persist/localStorage for members,
+  meetings, attendance, and pastoral notes.
+- Keep only short-lived UI state in React, and route all durable reads and
+  writes through Firebase repository functions.
+- Remove or isolate seed/demo data so it cannot appear as production data.
+- Remove local import confirmation paths that write imported members into
+  localStorage.
+- Update UI copy that currently says local mode remains available.
+- Clear or discard existing `followupgc-data` during the Firebase-only
+  transition; do not upload it to Firestore.
+
+Completed so far:
+
+- Main UI reads members from Firestore via `src/lib/remoteMembers.ts`.
+- Main UI no longer displays local seed members, sessions, attendance, or
+  timeline entries as production data.
+- Local durable write forms now show blocked/informational states until remote
+  write modules exist.
+- Legacy `followupgc-data` is cleared on app startup.
+- Removed `src/store/groupStore.ts`, `src/lib/memberImport.ts`, and
+  `src/domain/seed.ts`.
+- Removed direct `zustand` and `zod` dependencies from the app package.
+
+### Phase 5G - Remote Member Create/Edit
 
 Status: Planned
 
@@ -258,16 +293,43 @@ Tasks:
 - Respect role permissions.
 - Keep sensitive fields out of logs and dense UI.
 
-### Phase 5G - Remote Meetings And Attendance
+### Phase 5G - Remote Meetings
+
+Status: Completed
+
+Tasks:
+
+- Added remote meetings under `groups/{groupId}/meetings`.
+- Added `src/lib/remoteMeetings.ts` for read/create/update and delete
+  requests.
+- Re-enabled meeting create/update UI for active `owner` and `leader` roles.
+- Active `viewer` can read meetings but cannot write them.
+- Direct client delete is denied in Firestore Rules.
+- Added callable `deleteMeeting`, which deletes only when the meeting has no
+  child collection records such as attendance.
+- Attendance remains disabled until the next phase.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm --dir functions build` passed with local Node 26 warning because
+  functions target Node 20.
+- `pnpm test:rules` could not run in this environment because `firebase` CLI is
+  not installed.
+
+### Phase 5H - Remote Attendance
 
 Status: Planned
 
 Tasks:
 
-- Add remote meetings and attendance after remote member import is stable.
+- Add remote attendance after remote meetings are stable.
+- Store attendance under
+  `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`.
 - Extend rules and tests before writes.
 
-### Phase 5H - Remote Pastoral Notes
+### Phase 5I - Remote Pastoral Notes
 
 Status: Planned
 
@@ -278,33 +340,31 @@ Tasks:
 - Restrict pastoral notes to `owner` and `leader`.
 - Extend rules and tests before writes.
 
-### Optional Future - LocalStorage To Firestore Migration
-
-Status: Deferred / Optional
-
-Tasks:
-
-- Revisit only if users have real localStorage data that must be preserved.
-- Do not use this for the first real production data load.
-- Do not migrate seeds, demo data, local development data, or local test data.
-- Never migrate automatically.
-- Do not delete localStorage automatically.
-- If needed later, build a preview and require explicit confirmation before
-  upload.
-
-### Phase 6 - Remote Sync With Zustand
+### Phase 5F.1 - LocalStorage Cleanup
 
 Status: Planned
 
 Tasks:
 
-- Keep Zustand as UI/cache state.
+- Start the Firebase-only app from an empty production state unless Firestore
+  already has data for the selected remote group.
+- Clear or ignore the legacy `followupgc-data` key.
+- Do not use localStorage as a production data source.
+- Do not migrate seeds, demo data, local development data, or local test data.
+- Do not upload localStorage contents to Firestore.
+
+### Phase 6 - Remote Repository Expansion
+
+Status: Planned
+
+Tasks:
+
 - Add repository-style Firestore read/write functions.
 - Connect selected remote group data to store actions.
 - Handle write pending, success, and failure states.
 - Decide whether to enable Firestore offline persistence for sensitive data.
 - Avoid direct Firestore calls in UI components.
-- Keep local-only mode functional.
+- Do not preserve local-only production mode.
 
 ### Phase 7 - Extended XLSX Import Processing
 
@@ -326,7 +386,7 @@ Tasks:
 ### Product And UX
 
 - Design signed-in first-run flow.
-- Design local-only versus cloud-enabled mode selection.
+- Design signed-in Firebase-required first-run flow.
 - Design official Excel initial import UX with destination group, preview, and
   confirmation.
 - Refine the basic group selector for users with multiple groups.
@@ -367,7 +427,6 @@ Tasks:
 
 ## Open Decisions
 
-- Whether local-only mode remains the default path after Auth exists.
 - Whether single-group users without `defaultGroupId` should be prompted more
   prominently to save a default.
 - Whether viewers can read full member records or need sanitized projections.
@@ -379,8 +438,6 @@ Tasks:
   invite documents.
 - Whether the Storage source file should be deleted immediately after preview
   generation or retained for a short audit window.
-- Whether a future localStorage migration is ever needed for users with real
-  local data to preserve.
 - Exact lifecycle for uploaded XLSX source files after preview or confirmed
   import.
 
