@@ -14,6 +14,7 @@
     "preview": "scripts/with-node-22.sh vite preview",
     "functions:build": "scripts/with-node-22.sh pnpm --dir functions build",
     "functions:lint": "scripts/with-node-22.sh pnpm --dir functions lint",
+    "functions:test": "scripts/with-node-22.sh pnpm --dir functions test",
     "functions:serve": "scripts/with-node-22.sh pnpm --dir functions serve",
     "functions:deploy": "scripts/with-node-22.sh pnpm --dir functions deploy",
     "test:rules": "scripts/with-node-22.sh firebase emulators:exec --project demo-followupgc-rules --only firestore \"node --test tests/firestore.rules.test.mjs\"",

@@ -20,6 +20,9 @@ Source of truth: `src/domain/types.ts`.
 - Cancelled sessions remain in history and may include a comment.
 - Attendance applies to held sessions. The UI should not ask for attendance on
   cancelled sessions.
+- Remote attendance is stored under
+  `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`. The document
+  id is the member id, so each member has one attendance status per meeting.
 - Timeline entries belong to members and should remain chronological.
 - Weekdays use JavaScript `Date#getDay()` values: `0` Sunday through `6`
   Saturday.

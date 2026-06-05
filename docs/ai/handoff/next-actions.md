@@ -35,9 +35,11 @@
   `pnpm functions:build`, `pnpm functions:serve`, and `pnpm functions:deploy`
   so `scripts/with-node-22.sh` can select the expected Node version through
   `nvm` before running functions commands.
-- Next recommended phase: add callable tests for `deleteMeeting`, then
-  implement Phase 5H remote attendance under
-  `groups/{groupId}/meetings/{meetingId}/attendance`.
+- Phase 5H is implemented: remote attendance is stored under
+  `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`, and
+  owner/leader users can mark present, absent, or excused from the UI.
+- Next recommended phase: implement remote pastoral notes under member
+  subcollections before re-enabling the bitacora form.
 - Keep confirmed member writes disabled or blocked if `pnpm test:rules` or
   `pnpm test:storage-rules` fails.
 - Define Storage source file retention/deletion before broad production use.
@@ -60,7 +62,7 @@
   initial Firestore rules.
 - Firebase Phase 4.5 now has Firestore Rules tests in
   `tests/firestore.rules.test.mjs` and a `pnpm test:rules` script.
-- `pnpm test:rules` passed locally with Java 21: 30 executed, 30 passed,
+- `pnpm test:rules` passed locally with Java 21: 33 executed, 33 passed,
   0 failed, exit code 0.
 - `pnpm test:storage-rules` passed locally with Java 21: 4 executed, 4 passed,
   0 failed, exit code 0.

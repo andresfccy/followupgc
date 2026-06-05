@@ -96,8 +96,37 @@ Validation:
 
 Remaining:
 
-- Add dedicated callable tests for `deleteMeeting`.
-- Implement Phase 5H remote attendance under meeting subcollections.
+- Add remote pastoral notes before re-enabling the bitacora form.
+
+## 2026-06-04: Phase 5H Remote Attendance Implemented
+
+Remote attendance is implemented as Firebase production data under each held
+meeting.
+
+What changed:
+
+- Added `src/lib/remoteAttendance.ts` for Firestore subscriptions and writes
+  under `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`.
+- Updated `src/App.tsx` so the selected held meeting loads attendance from
+  Firestore and owner/leader users can mark present, absent, or excused.
+- Cancelled meetings continue to hide attendance controls.
+- Extended `firestore.rules` with a validated attendance shape:
+  `meetingId`, `memberId`, `status`, optional `comment`, `recordedBy`,
+  `recordedAt`, and `updatedAt`.
+- Attendance writes require an active owner/leader, an existing held meeting,
+  and an existing public member document.
+- Added dedicated callable-core tests for `deleteMeetingRecord`, including
+  active owner/leader success, denied viewer/inactive/stranger, missing meeting,
+  and child-record precondition cases.
+- Added `pnpm functions:test` for Cloud Functions unit tests.
+
+Validation:
+
+- `pnpm lint` passed.
+- `pnpm build` passed with the existing Firebase/Vite chunk-size warning.
+- `pnpm functions:lint` passed.
+- `pnpm functions:test` passed: 4 executed, 4 passed, 0 failed.
+- `pnpm test:rules` passed: 33 executed, 33 passed, 0 failed.
 
 ## 2026-06-04: Node 22 Runtime Alignment
 

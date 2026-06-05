@@ -16,6 +16,10 @@ library.
 - `src/lib/remoteGroups.ts`: Firestore group and membership repository.
 - `src/lib/remoteImports.ts`: Storage/importRun/callable import repository.
 - `src/lib/remoteMembers.ts`: Firestore remote member read repository.
+- `src/lib/remoteMeetings.ts`: Firestore meeting repository and callable
+  deletion entrypoint.
+- `src/lib/remoteAttendance.ts`: Firestore meeting-attendance repository under
+  meeting subcollections.
 - `src/lib/legacyLocalStorage.ts`: one-way cleanup for the retired
   `followupgc-data` key.
 - `src/lib/date.ts`: date formatting, weekday labels, next meeting calculation.

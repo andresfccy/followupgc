@@ -6,6 +6,7 @@
   "scripts": {
     "build": "../scripts/with-node-22.sh tsc",
     "lint": "../scripts/with-node-22.sh tsc --noEmit",
+    "test": "../scripts/with-node-22.sh sh -c 'pnpm build && node --test test/*.test.mjs'",
     "serve": "../scripts/with-node-22.sh sh -c 'pnpm build && firebase emulators:start --only functions,firestore,storage'",
     "deploy": "../scripts/with-node-22.sh firebase deploy --only functions"
   },

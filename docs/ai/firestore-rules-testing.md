@@ -3,9 +3,9 @@
 ## Purpose
 
 Phase 4.5 added automated Firestore Security Rules tests before any local
-pastoral data is migrated to Firestore. Phase 5C expands the suite for
-importRuns, previewRows, public member docs, and private profiles before final
-Excel import writes are enabled.
+pastoral data is migrated to Firestore. Phase 5C expanded the suite for
+importRuns, previewRows, public member docs, and private profiles. Phase 5H
+adds remote meetings and attendance coverage.
 
 The tests validate that `firestore.rules` protects the remote identity layer:
 
@@ -18,9 +18,11 @@ The tests validate that `firestore.rules` protects the remote identity layer:
 - `groups/{groupId}/importRuns/{importRunId}/previewRows/{rowId}`
 - `groups/{groupId}/members/{memberId}`
 - `groups/{groupId}/members/{memberId}/private/profile`
+- `groups/{groupId}/meetings/{meetingId}`
+- `groups/{groupId}/meetings/{meetingId}/attendance/{memberId}`
 
 These tests do not confirm/import final members, migrate localStorage, or move
-meetings, attendance, pastoral notes, or local settings.
+pastoral notes or local settings.
 
 ## How To Run
 
@@ -45,13 +47,13 @@ pnpm test:storage-rules
 The script runs:
 
 ```bash
-firebase emulators:exec --only firestore "node --test tests/firestore.rules.test.mjs"
+firebase emulators:exec --project demo-followupgc-rules --only firestore "node --test tests/firestore.rules.test.mjs"
 ```
 
 The Storage Rules script runs:
 
 ```bash
-firebase emulators:exec --only firestore,storage "node --test tests/storage.rules.test.mjs"
+firebase emulators:exec --project demo-followupgc-rules --only firestore,storage "node --test tests/storage.rules.test.mjs"
 ```
 
 The test file uses `@firebase/rules-unit-testing` and Node's built-in test
@@ -60,12 +62,12 @@ rules-focused runner.
 
 ## Latest Result
 
-Phase 5C validation uses Java 21+ and the Firebase emulators.
+Phase 5H validation uses Java 21 and the Firebase emulators.
 
 Latest result:
 
 - `java -version`: OpenJDK 21.0.11.
-- `pnpm test:rules`: 27 tests executed, 27 passed, 0 failed, exit code 0.
+- `pnpm test:rules`: 33 tests executed, 33 passed, 0 failed, exit code 0.
 - `pnpm test:storage-rules`: 4 tests executed, 4 passed, 0 failed, exit code
   0.
 - Firestore and Storage emulators started and shut down correctly.
@@ -124,6 +126,20 @@ Critical writes:
 - `owner` and `leader` can write future group data paths currently reserved by
   rules; `viewer`, `inactive`, and unaffiliated users cannot.
 
+Meetings and attendance:
+
+- `owner` and `leader` can create, read, and update meetings.
+- `viewer` can read meetings but cannot update or delete them.
+- Direct client meeting delete is denied; deletion goes through the callable
+  function.
+- Meeting writes require the expected shape.
+- Active members can read attendance.
+- `owner` and `leader` can write attendance for held meetings.
+- Attendance writes require the expected shape, an existing held meeting, and
+  an existing public member document.
+- `viewer`, inactive members, signed-out users, and unaffiliated users cannot
+  write attendance.
+
 Import runs:
 
 - `owner` and `leader` can create/read importRuns.
@@ -177,10 +193,11 @@ authorization.
 - Viewer can read public member docs only because full `documentId`, phone,
   birthday, and pastoral notes are excluded from that document. Revisit whether
   `documentIdHash` should remain viewer-readable before broad production use.
-- Rules do not validate final `meetings`, `attendance`, or `pastoralNotes`
-  documents because those collections are not written by the app yet.
-- Storage Rules tests use the emulator with project id `followupgc` because
-  Storage Rules consult Firestore membership documents.
+- Rules do not validate final `pastoralNotes` documents because that collection
+  is not written by the app yet.
+- Firestore and Storage Rules tests use the emulator with project id
+  `demo-followupgc-rules` because Storage Rules consult Firestore membership
+  documents and both suites must share the same project id.
 - Membership mirrors must remain synchronized with authoritative memberships in
   `groups/{groupId}/memberships/{uid}`.
 - Rules must be extended and re-tested whenever new remote collections are

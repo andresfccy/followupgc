@@ -25,38 +25,48 @@ export const deleteMeeting = onCall(
       throw new HttpsError('invalid-argument', 'Falta el grupo o la reunion.')
     }
 
-    const db = getFirestore()
-    await assertCanDeleteMeeting(db, groupId, uid)
-
-    const meetingRef = db.doc(`groups/${groupId}/meetings/${meetingId}`)
-    const meeting = await meetingRef.get()
-
-    if (!meeting.exists) {
-      throw new HttpsError('not-found', 'No se encontro la reunion.')
-    }
-
-    const childCollections = await meetingRef.listCollections()
-    for (const childCollection of childCollections) {
-      const childSnapshot = await childCollection.limit(1).get()
-      if (!childSnapshot.empty) {
-        throw new HttpsError(
-          'failed-precondition',
-          'No se puede eliminar una reunion con asistencia u otros registros asociados.',
-        )
-      }
-    }
-
-    await meetingRef.delete()
+    await deleteMeetingRecord(getFirestore(), { groupId, meetingId, uid })
 
     return { deleted: true }
   },
 )
 
-async function assertCanDeleteMeeting(
-  db: FirebaseFirestore.Firestore,
-  groupId: string,
-  uid: string,
+export async function deleteMeetingRecord(
+  db: Pick<FirebaseFirestore.Firestore, 'doc'>,
+  {
+    groupId,
+    meetingId,
+    uid,
+  }: {
+    groupId: string
+    meetingId: string
+    uid: string
+  },
 ) {
+  await assertCanDeleteMeeting(db, groupId, uid)
+
+  const meetingRef = db.doc(`groups/${groupId}/meetings/${meetingId}`)
+  const meeting = await meetingRef.get()
+
+  if (!meeting.exists) {
+    throw new HttpsError('not-found', 'No se encontro la reunion.')
+  }
+
+  const childCollections = await meetingRef.listCollections()
+  for (const childCollection of childCollections) {
+    const childSnapshot = await childCollection.limit(1).get()
+    if (!childSnapshot.empty) {
+      throw new HttpsError(
+        'failed-precondition',
+        'No se puede eliminar una reunion con asistencia u otros registros asociados.',
+      )
+    }
+  }
+
+  await meetingRef.delete()
+}
+
+async function assertCanDeleteMeeting(db: Pick<FirebaseFirestore.Firestore, 'doc'>, groupId: string, uid: string) {
   const membership = await db.doc(`groups/${groupId}/memberships/${uid}`).get()
   const role = membership.get('role')
   const status = membership.get('status')

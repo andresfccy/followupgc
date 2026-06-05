@@ -436,6 +436,114 @@ test('meeting writes require the expected shape and direct delete is denied', as
   await assertFails(authedDb('owner-a').doc('groups/group-a/meetings/meeting-a').delete())
 })
 
+test('active members can read attendance and owner or leader can write it', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'leader-a', role: 'leader', status: 'active' },
+      { uid: 'viewer-a', role: 'viewer', status: 'active' },
+    ],
+  })
+  await seedMeeting({ groupId: 'group-a', meetingId: 'meeting-a', createdBy: 'owner-a' })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+
+  await assertSucceeds(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/meeting-a/attendance/member-a')
+      .set(validAttendance({ meetingId: 'meeting-a', memberId: 'member-a', recordedBy: 'owner-a' })),
+  )
+  await assertSucceeds(
+    authedDb('leader-a').doc('groups/group-a/meetings/meeting-a/attendance/member-a').set(
+      {
+        status: 'excused',
+        recordedBy: 'leader-a',
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  )
+  await assertSucceeds(
+    authedDb('viewer-a').doc('groups/group-a/meetings/meeting-a/attendance/member-a').get(),
+  )
+})
+
+test('viewer, inactive, signed-out, and unaffiliated users cannot write attendance', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [
+      { uid: 'owner-a', role: 'owner', status: 'active' },
+      { uid: 'viewer-a', role: 'viewer', status: 'active' },
+      { uid: 'inactive-a', role: 'leader', status: 'inactive' },
+    ],
+  })
+  await seedMeeting({ groupId: 'group-a', meetingId: 'meeting-a', createdBy: 'owner-a' })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+
+  await assertFails(
+    authedDb('viewer-a')
+      .doc('groups/group-a/meetings/meeting-a/attendance/member-a')
+      .set(validAttendance({ meetingId: 'meeting-a', memberId: 'member-a', recordedBy: 'viewer-a' })),
+  )
+  await assertFails(
+    authedDb('inactive-a')
+      .doc('groups/group-a/meetings/meeting-a/attendance/member-a')
+      .set(validAttendance({ meetingId: 'meeting-a', memberId: 'member-a', recordedBy: 'inactive-a' })),
+  )
+  await assertFails(
+    authedDb('stranger-a')
+      .doc('groups/group-a/meetings/meeting-a/attendance/member-a')
+      .set(validAttendance({ meetingId: 'meeting-a', memberId: 'member-a', recordedBy: 'stranger-a' })),
+  )
+  await assertFails(
+    testEnv
+      .unauthenticatedContext()
+      .firestore()
+      .doc('groups/group-a/meetings/meeting-a/attendance/member-a')
+      .set(validAttendance({ meetingId: 'meeting-a', memberId: 'member-a', recordedBy: 'signed-out' })),
+  )
+})
+
+test('attendance writes require expected shape, held meeting, and existing member', async () => {
+  await seedGroup({
+    groupId: 'group-a',
+    createdBy: 'owner-a',
+    memberships: [{ uid: 'owner-a', role: 'owner', status: 'active' }],
+  })
+  await seedMeeting({ groupId: 'group-a', meetingId: 'held-meeting', createdBy: 'owner-a' })
+  await seedMeeting({
+    groupId: 'group-a',
+    meetingId: 'cancelled-meeting',
+    createdBy: 'owner-a',
+    status: 'cancelled',
+  })
+  await seedPublicMember({ groupId: 'group-a', memberId: 'member-a' })
+
+  await assertFails(
+    authedDb('owner-a').doc('groups/group-a/meetings/held-meeting/attendance/member-a').set({
+      ...validAttendance({ meetingId: 'held-meeting', memberId: 'member-a', recordedBy: 'owner-a' }),
+      status: 'late',
+    }),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/held-meeting/attendance/member-a')
+      .set(validAttendance({ meetingId: 'other-meeting', memberId: 'member-a', recordedBy: 'owner-a' })),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/held-meeting/attendance/missing-member')
+      .set(validAttendance({ meetingId: 'held-meeting', memberId: 'missing-member', recordedBy: 'owner-a' })),
+  )
+  await assertFails(
+    authedDb('owner-a')
+      .doc('groups/group-a/meetings/cancelled-meeting/attendance/member-a')
+      .set(validAttendance({ meetingId: 'cancelled-meeting', memberId: 'member-a', recordedBy: 'owner-a' })),
+  )
+})
+
 test('owner and leader can create and read importRuns', async () => {
   await seedGroup({
     groupId: 'group-a',
@@ -761,12 +869,12 @@ async function seedPrivateProfile({ groupId, memberId }) {
   })
 }
 
-async function seedMeeting({ groupId, meetingId, createdBy }) {
+async function seedMeeting({ groupId, meetingId, createdBy, status = 'held' }) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await context
       .firestore()
       .doc(`groups/${groupId}/meetings/${meetingId}`)
-      .set(validMeeting({ createdBy }))
+      .set(validMeeting({ createdBy, status }))
   })
 }
 
@@ -850,14 +958,25 @@ function validPrivateProfile() {
   }
 }
 
-function validMeeting({ createdBy }) {
+function validMeeting({ createdBy, status = 'held' }) {
   return {
     date: '2026-06-05',
-    status: 'held',
+    status,
     title: 'Grupo en casa',
     comment: 'Tema semanal',
     createdBy,
     createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function validAttendance({ meetingId, memberId, recordedBy, status = 'present' }) {
+  return {
+    meetingId,
+    memberId,
+    status,
+    recordedBy,
+    recordedAt: now,
     updatedAt: now,
   }
 }

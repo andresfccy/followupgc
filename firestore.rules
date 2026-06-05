@@ -18,6 +18,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/groups/$(groupId);
     }
 
+    function meetingPath(groupId, meetingId) {
+      return /databases/$(database)/documents/groups/$(groupId)/meetings/$(meetingId);
+    }
+
+    function memberPath(groupId, memberId) {
+      return /databases/$(database)/documents/groups/$(groupId)/members/$(memberId);
+    }
+
     function hasActiveMembership(groupId, userId) {
       return exists(membershipPath(groupId, userId)) &&
         get(membershipPath(groupId, userId)).data.status == 'active';
@@ -131,6 +139,23 @@ service cloud.firestore {
       request.resource.data.title.size() > 0 &&
       (!('comment' in request.resource.data) || request.resource.data.comment is string) &&
       request.resource.data.createdBy is string;
+    }
+
+    function validAttendanceDoc(meetingId, memberId) {
+      return request.resource.data.keys().hasOnly([
+        'meetingId',
+        'memberId',
+        'status',
+        'comment',
+        'recordedBy',
+        'recordedAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.meetingId == meetingId &&
+      request.resource.data.memberId == memberId &&
+      request.resource.data.status in ['present', 'absent', 'excused'] &&
+      request.resource.data.recordedBy is string &&
+      (!('comment' in request.resource.data) || request.resource.data.comment is string);
     }
 
     function validRole(role) {
@@ -298,7 +323,12 @@ service cloud.firestore {
 
         match /attendance/{memberId} {
           allow read: if isActiveMember(groupId);
-          allow create, update, delete: if isLeaderOrOwner(groupId);
+          allow create, update: if isLeaderOrOwner(groupId) &&
+            exists(meetingPath(groupId, meetingId)) &&
+            get(meetingPath(groupId, meetingId)).data.status == 'held' &&
+            exists(memberPath(groupId, memberId)) &&
+            validAttendanceDoc(meetingId, memberId);
+          allow delete: if isLeaderOrOwner(groupId);
         }
       }
     }

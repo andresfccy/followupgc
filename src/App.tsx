@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 import type {
   AttendanceStatus,
-  AttendanceRecord,
   MemberStatus,
   Weekday,
 } from '@/domain/types'
@@ -46,6 +45,11 @@ import {
   updateRemoteMeeting,
   type RemoteMeeting,
 } from '@/lib/remoteMeetings'
+import {
+  setRemoteAttendance,
+  subscribeRemoteAttendance,
+  type RemoteAttendanceRecord,
+} from '@/lib/remoteAttendance'
 import { createRemoteGroup, setDefaultGroupId } from '@/lib/remoteGroups'
 import { useAuthSession, type AuthSession } from '@/lib/useAuthSession'
 import { clearLegacyGroupStorage } from '@/lib/legacyLocalStorage'
@@ -63,8 +67,6 @@ const memberStatusLabels: Record<MemberStatus, string> = {
   inactive: 'Inactivo',
 }
 
-const emptyAttendances: AttendanceRecord[] = []
-
 function App() {
   const authSession = useAuthSession()
   const [remoteMembersState, setRemoteMembersState] = useState<{
@@ -77,6 +79,12 @@ function App() {
     meetings: RemoteMeeting[]
     error: string
   }>({ groupId: '', meetings: [], error: '' })
+  const [remoteAttendanceState, setRemoteAttendanceState] = useState<{
+    groupId: string
+    meetingId: string
+    attendances: RemoteAttendanceRecord[]
+    error: string
+  }>({ groupId: '', meetingId: '', attendances: [], error: '' })
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [editingMeetingId, setEditingMeetingId] = useState('')
@@ -98,7 +106,6 @@ function App() {
   const isLoadingMeetings = Boolean(
     authSession.currentGroupId && remoteMeetingsState.groupId !== authSession.currentGroupId,
   )
-  const attendances = emptyAttendances
   const members =
     remoteMembersState.groupId === authSession.currentGroupId ? remoteMembersState.members : []
   const remoteMembersError =
@@ -113,6 +120,25 @@ function App() {
   const selectedMember = members.find((member) => member.id === effectiveSelectedMemberId)
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? sessions[0]
+  const attendances =
+    selectedSession &&
+    remoteAttendanceState.groupId === authSession.currentGroupId &&
+    remoteAttendanceState.meetingId === selectedSession.id
+      ? remoteAttendanceState.attendances
+      : []
+  const remoteAttendanceError =
+    selectedSession &&
+    remoteAttendanceState.groupId === authSession.currentGroupId &&
+    remoteAttendanceState.meetingId === selectedSession.id
+      ? remoteAttendanceState.error
+      : ''
+  const isLoadingAttendance = Boolean(
+    authSession.currentGroupId &&
+      selectedSession?.id &&
+      selectedSession.status === 'held' &&
+      (remoteAttendanceState.groupId !== authSession.currentGroupId ||
+        remoteAttendanceState.meetingId !== selectedSession.id),
+  )
   const editingMeeting = sessions.find((session) => session.id === editingMeetingId)
   const canManageMeetings = Boolean(
     authSession.currentMembership &&
@@ -147,6 +173,25 @@ function App() {
       })
     })
   }, [authSession.currentGroupId])
+
+  useEffect(() => {
+    if (!authSession.currentGroupId || !selectedSession?.id || selectedSession.status !== 'held') {
+      return undefined
+    }
+
+    return subscribeRemoteAttendance(
+      authSession.currentGroupId,
+      selectedSession.id,
+      ({ attendances: nextAttendances, error }) => {
+        setRemoteAttendanceState({
+          groupId: authSession.currentGroupId,
+          meetingId: selectedSession.id,
+          attendances: nextAttendances,
+          error,
+        })
+      },
+    )
+  }, [authSession.currentGroupId, selectedSession?.id, selectedSession?.status])
 
   useEffect(() => {
     if (!authSession.currentGroupId) {
@@ -226,6 +271,36 @@ function App() {
       setAuthStatus('Reunion eliminada.')
     } catch (error) {
       setAuthStatus(error instanceof Error ? error.message : 'No se pudo eliminar la reunion.')
+    }
+  }
+
+  async function handleSetAttendance(memberId: string, status: AttendanceStatus) {
+    if (!authSession.user || !authSession.currentGroupId || !selectedSession) {
+      setAuthStatus('Selecciona una reunion remota antes de registrar asistencia.')
+      return
+    }
+
+    if (!canManageMeetings) {
+      setAuthStatus('Solo owner o leader activos pueden registrar asistencia.')
+      return
+    }
+
+    if (selectedSession.status !== 'held') {
+      setAuthStatus('La asistencia solo aplica a reuniones realizadas.')
+      return
+    }
+
+    try {
+      await setRemoteAttendance(
+        authSession.user,
+        authSession.currentGroupId,
+        selectedSession.id,
+        memberId,
+        status,
+      )
+      setAuthStatus('Asistencia actualizada en Firebase.')
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : 'No se pudo guardar la asistencia.')
     }
   }
 
@@ -622,6 +697,10 @@ function App() {
                   <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     Esta fecha esta marcada como no realizada. El comentario conserva el motivo.
                   </p>
+                ) : isLoadingAttendance ? (
+                  <EmptyState text="Cargando asistencia desde Firestore..." />
+                ) : remoteAttendanceError ? (
+                  <EmptyState text={remoteAttendanceError} />
                 ) : (
                   members.map((member) => {
                     const attendance = attendances.find(
@@ -640,16 +719,19 @@ function App() {
                                   ? 'border-emerald-700 bg-emerald-700 text-white'
                                   : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-500',
                               )}
-                              onClick={() =>
-                                setAuthStatus(
-                                  'La asistencia se escribira cuando el modulo remoto de reuniones este listo.',
-                                )
-                              }
+                              disabled={!canManageMeetings}
+                              onClick={() => handleSetAttendance(member.id, status)}
+                              type="button"
                             >
                               {attendanceLabels[status]}
                             </button>
                           ))}
                         </div>
+                        {!canManageMeetings ? (
+                          <p className="mt-2 text-xs text-slate-500">
+                            Solo owner o leader activos pueden editar asistencia.
+                          </p>
+                        ) : null}
                       </div>
                     )
                   })
